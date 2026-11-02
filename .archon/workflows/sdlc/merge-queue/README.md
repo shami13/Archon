@@ -37,7 +37,12 @@ once rewrote one and merged unflagged.
 Approval covers the recorded batch. Auto explicitly authorizes that batch without
 a human pause, subject to repository guidance. Processing is sequential. Changed
 heads, unrelated base movement, stale validation after an earlier merge, unresolved
-findings, conflicts and pending checks hold the remaining work. GitHub-native
+findings, conflicts and pending checks hold the remaining work. With the
+external review gate on (`ARCHON_SDLC_EXTERNAL_REVIEW=copilot`), so does a head
+no passing Copilot review covers, in the gate and again before each merge; deliver
+that pull request through `archon-deliver`, which records the review. See External
+review in [`../README.md`](../README.md#external-review) for the setting and how to
+recover a stopped gate. GitHub-native
 queues remain held when queue membership or merge state is unconfirmed; they are
 not reported as queued without structured read-back. No admin bypass is used.
 

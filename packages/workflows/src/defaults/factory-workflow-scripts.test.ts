@@ -1086,21 +1086,32 @@ describe('merge queue under the external review gate', () => {
     ARCHON_SDLC_GITHUB_LOGIN: 'shami13',
     STATE_DIR: state,
   });
-  async function passCopilotReview(state: string): Promise<void> {
+  /** A state directory whose ledger passed pull request `number` at `head`, or holds nothing. */
+  async function stateWith(pass?: { number: number; head: string }): Promise<string> {
+    const state = await mkdtemp(join(root, 'state-'));
+    if (pass === undefined) return state;
     const dir = join(state, 'sdlc-external-review', 'github.com', 'owner', 'repo');
     await mkdir(dir, { recursive: true });
     const verdict = {
       event: 'verdict',
       review: '1',
-      head: 'head-17',
+      head: pass.head,
       verdict: 'clean',
       findings: 0,
-      corrections: 0,
       at: 't',
       run: 'r',
     };
-    await writeFile(join(dir, 'pull-17.jsonl'), `${JSON.stringify(verdict)}\n`);
+    await writeFile(join(dir, `pull-${String(pass.number)}.jsonl`), `${JSON.stringify(verdict)}\n`);
+    return state;
   }
+  // The planned head is head-17 of pull 17; a pass of anything else covers nothing.
+  const holds = {
+    'no ledger': undefined,
+    'a pass of an earlier head': { number: 17, head: 'head-16' },
+    'a pass of another pull request': { number: 18, head: 'head-17' },
+  } as const;
+  const reviewed = { number: 17, head: 'head-17' };
+
   async function gateWith(state: string): Promise<Record<string, unknown>> {
     const { artifacts, content } = await mergeFixture('squash', url);
     const result = run(mergeScript, {
@@ -1115,18 +1126,9 @@ describe('merge queue under the external review gate', () => {
     return JSON.parse(stdout(result)) as Record<string, unknown>;
   }
 
-  test('the gate holds a planned head no passing Copilot review covers', async () => {
-    const state = await mkdtemp(join(root, 'state-'));
-    expect(await gateWith(state)).toMatchObject({
-      ready: false,
-      summary: expect.stringContaining(`no passing Copilot review of ${url} at head-17`),
-    });
-    await passCopilotReview(state);
-    expect(await gateWith(state)).toMatchObject({ ready: true });
-  });
-
-  test('an authorized write still stops before gh when the head has no passing review', async () => {
-    const state = await mkdtemp(join(root, 'state-'));
+  async function executeWith(
+    state: string
+  ): Promise<{ result: Record<string, unknown>; gh: string[][] }> {
     const { artifacts, content } = await mergeFixture('squash', url);
     const ghLog = join(artifacts, 'gh.jsonl');
     const result = run(mergeScript, {
@@ -1150,11 +1152,49 @@ describe('merge queue under the external review gate', () => {
       PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
     });
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(stdout(result))).toMatchObject({
-      merged: false,
-      summary: expect.stringContaining('deliver it through archon-deliver'),
+    const gh = await readFile(ghLog, 'utf8').then(
+      text =>
+        text
+          .trim()
+          .split('\n')
+          .map(line => JSON.parse(line) as string[]),
+      () => []
+    );
+    return { result: JSON.parse(stdout(result)) as Record<string, unknown>, gh };
+  }
+
+  for (const [label, pass] of Object.entries(holds)) {
+    test(`the gate holds the planned head with ${label}`, async () => {
+      expect(await gateWith(await stateWith(pass))).toMatchObject({
+        ready: false,
+        summary: expect.stringContaining(`no passing Copilot review of ${url} at head-17`),
+      });
     });
-    await expect(readFile(ghLog, 'utf8')).rejects.toThrow();
+
+    test(`an authorized write with ${label} stops before gh`, async () => {
+      const { result, gh } = await executeWith(await stateWith(pass));
+      expect(result).toMatchObject({
+        merged: false,
+        summary: expect.stringContaining('deliver it through archon-deliver'),
+      });
+      expect(gh).toEqual([]);
+    });
+  }
+
+  test('the gate passes and the write merges the head a Copilot review passed', async () => {
+    expect(await gateWith(await stateWith(reviewed))).toMatchObject({ ready: true });
+    const { result, gh } = await executeWith(await stateWith(reviewed));
+    expect(result).toMatchObject({ merged: true });
+    expect(gh[0]).toEqual([
+      'pr',
+      'merge',
+      '17',
+      '--repo',
+      'owner/repo',
+      '--squash',
+      '--match-head-commit',
+      'head-17',
+    ]);
   });
 });
 

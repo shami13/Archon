@@ -19,6 +19,7 @@ import {
   ROUTE_ACTIONS,
   TRIAGE_OUTCOMES,
   decide,
+  EXTERNAL_REVIEW_MODES,
   externalReviewHold,
   externalReviewPolicy,
   findingsOf,
@@ -28,11 +29,27 @@ import {
   type GitHub,
   type GitHubRequest,
   type Observation,
+  type Receipt,
 } from '../../workflows/sdlc/.shared/external-review';
 import type { QualifiedPr } from '../../workflows/sdlc/.shared/forge';
 import { PR_URL, runDeliverScript, runPackScript, type ScriptRun } from './deliver-checks-harness';
 
 const trackTempRoot = trackTempRoots();
+/** Commits made here and by the land script read no user or system git config. */
+const GIT_ISOLATION = {
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_AUTHOR_NAME: 'Test',
+  GIT_AUTHOR_EMAIL: 'test@example.com',
+  GIT_COMMITTER_NAME: 'Test',
+  GIT_COMMITTER_EMAIL: 'test@example.com',
+};
+
+function git(cwd: string, ...args: string[]): string {
+  const result = Bun.spawnSync(['git', ...args], { cwd, env: { ...process.env, ...GIT_ISOLATION } });
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr.toString()}`);
+  return result.stdout.toString().trim();
+}
 const REF: QualifiedPr = { repo: { host: 'github.com', path: 'example/repo' }, number: 7 };
 const HEAD = 'a'.repeat(40);
 const OLD_HEAD = 'b'.repeat(40);
@@ -81,6 +98,8 @@ class FakeGitHub {
   requestListsCopilot = true;
   /** The POST is applied, but its response never reaches the gate. */
   loseReceipt = false;
+  /** Runs when the POST reaches GitHub, before its receipt returns. */
+  onPost: (() => void) | undefined;
   failOn: string | undefined;
   readonly calls: GitHubRequest[] = [];
 
@@ -96,6 +115,7 @@ class FakeGitHub {
       return { state: this.state, head: { sha: this.head }, requested_reviewers: this.requested };
     }
     if (path === `${base}/requested_reviewers` && request.method === 'POST') {
+      this.onPost?.();
       this.requested = this.requestListsCopilot ? [COPILOT_REQUESTED] : [];
       if (this.loseReceipt) throw new Error('gh api requested_reviewers: connection reset');
       return { number: REF.number, head: { sha: this.head }, requested_reviewers: this.requested };
@@ -275,6 +295,55 @@ describe('observing the Copilot review of the current head', () => {
     expect(github.posts()).toBe(1);
   });
 
+  // Two runs observe one head and neither has requested a review yet.
+  it('sends one request when another run claims it between this run\'s read and its claim', async () => {
+    const github = new FakeGitHub();
+    github.requestListsCopilot = false;
+    const dir = scratch();
+    const arrives = (elapsed: number): void => {
+      if (elapsed === 4 * MINUTE && github.reviews.length === 0) github.submit(14, 30);
+    };
+    let other: Promise<Observation> | undefined;
+    class ReadThenYield extends Ledger {
+      override request(head: string): Receipt | undefined {
+        const receipt = super.request(head);
+        other ??= observe(github, ledger(dir, 'run-b'), arrives);
+        return receipt;
+      }
+    }
+    const mine = await observe(github, new ReadThenYield(ledger(dir, 'run-a').path, 'run-a'), arrives);
+    expect(mine.review.id).toBe('14');
+    expect((await other)?.review.id).toBe('14');
+    expect(github.posts()).toBe(1);
+    expect(
+      ledger(dir).events().map(event => (event.event === 'requested' ? `${event.run} ${event.receipt}` : event.event))
+    ).toEqual(['run-b attempted', 'run-b accepted', 'run-a attempted']);
+  });
+
+  it('sends one request when another run observes while this run\'s request is in flight', async () => {
+    const github = new FakeGitHub();
+    github.requestListsCopilot = false;
+    const dir = scratch();
+    let other: Promise<Observation> | undefined;
+    github.onPost = (): void => {
+      other ??= observe(github, ledger(dir, 'run-b'));
+    };
+    const mine = await observe(github, ledger(dir, 'run-a'), elapsed => {
+      if (elapsed === 4 * MINUTE) github.submit(14, 30);
+    });
+    expect(mine.review.id).toBe('14');
+    expect((await other)?.review.id).toBe('14');
+    expect(github.posts()).toBe(1);
+  });
+
+  it('settles the request by log order when both claims land before either reads back', () => {
+    const dir = scratch();
+    // B's claim reaches the log after A read no request and before A writes its own.
+    ledger(dir, 'run-b').append({ event: 'requested', head: HEAD, receipt: 'attempted' });
+    expect(ledger(dir, 'run-a').claimRequest(HEAD)).toBe(false);
+    expect(ledger(dir).request(HEAD)).toBe('attempted');
+  });
+
   it('refuses a receipt for another head', async () => {
     const github = new FakeGitHub();
     const api: GitHub = request =>
@@ -294,7 +363,7 @@ describe('observing the Copilot review of the current head', () => {
     const github = new FakeGitHub();
     github.reviews = [review(30, HEAD, 1)];
     const book = ledger();
-    book.append({ event: 'verdict', review: '30', head: HEAD, verdict: 'unavailable', findings: 0, corrections: 0 });
+    book.append({ event: 'verdict', review: '30', head: HEAD, verdict: 'unavailable', findings: 0 });
     expect(await refusal(observe(github, book))).toMatch(/did not review the change.*request a Copilot review/);
 
     github.requested = [COPILOT_REQUESTED];
@@ -414,7 +483,7 @@ describe('the policy that turns the gate on', () => {
 
   it('refuses a value it does not know rather than turning the gate off', () => {
     expect(() => withEnv({ ARCHON_SDLC_EXTERNAL_REVIEW: 'Copilot' }, externalReviewPolicy)).toThrow(
-      /must be "none" \(the default\) or "copilot"/
+      /must be one of "none", "copilot" \(the first is the default\), not "Copilot"/
     );
   });
 });
@@ -434,83 +503,74 @@ describe('routing a review', () => {
 
   it('passes a review with no findings, and never one Copilot did not perform', () => {
     const book = ledger();
-    expect(decide({ review: '1', outcome: 'reviewed', findings: [], allowCorrection: true, ledger: book }).verdict).toBe(
-      'clean'
+    expect(decide({ review: '1', outcome: 'reviewed', findings: [], allowCorrection: true, ledger: book })).toBe('clean');
+    expect(decide({ review: '1', outcome: 'unavailable', findings: [], allowCorrection: true, ledger: book })).toBe(
+      'unavailable'
     );
-    expect(
-      decide({ review: '1', outcome: 'unavailable', findings: [], allowCorrection: true, ledger: book }).verdict
-    ).toBe('unavailable');
   });
 
   it('corrects confirmed findings and passes an unchanged head only once its declines were verified', () => {
     const book = ledger();
     const input = { review: '1', outcome: 'reviewed' as const, findings: inline, allowCorrection: true, ledger: book };
-    expect(decide(input)).toEqual({ verdict: 'correct', corrections: 1 });
-    book.append({ event: 'verdict', review: '1', head: HEAD, verdict: 'correct', findings: 2, corrections: 1 });
+    expect(decide(input)).toBe('correct');
+    expect(book.recordVerdict({ review: '1', head: HEAD, verdict: decide(input), findings: 2 })).toEqual({
+      verdict: 'correct',
+      corrections: 1,
+    });
     // A rerun of the same cycle after a restart is the same correction.
-    expect(decide(input)).toEqual({ verdict: 'correct', corrections: 1 });
+    expect(book.recordVerdict({ review: '1', head: HEAD, verdict: decide(input), findings: 2 })).toEqual({
+      verdict: 'correct',
+      corrections: 1,
+    });
     book.append({ event: 'verified', review: '1', head: HEAD });
-    expect(decide(input)).toEqual({ verdict: 'adjudicated', corrections: 1 });
+    expect(decide(input)).toBe('adjudicated');
   });
+
+  const claim = (book: Ledger, review: string): { verdict: string; corrections: number } => {
+    const verdict = decide({ review, outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: book });
+    return book.recordVerdict({ review, head: `h-${review}`, verdict, findings: 2 });
+  };
 
   it('allows five corrections per pull request, counted from the persisted ledger', () => {
     const dir = scratch();
     const first = ledger(dir, 'run-1');
     for (let cycle = 1; cycle <= MAX_CORRECTIONS; cycle++) {
-      const verdict = decide({
-        review: String(cycle),
-        outcome: 'reviewed',
-        findings: inline,
-        allowCorrection: true,
-        ledger: first,
-      });
-      expect(verdict).toEqual({ verdict: 'correct', corrections: cycle });
-      first.append({ event: 'verdict', review: String(cycle), head: `h${String(cycle)}`, verdict: 'correct', findings: 2, corrections: cycle });
-      first.append({ event: 'verified', review: String(cycle), head: `h${String(cycle)}` });
+      expect(claim(first, String(cycle))).toEqual({ verdict: 'correct', corrections: cycle });
+      first.append({ event: 'verified', review: String(cycle), head: `h-${String(cycle)}` });
     }
     // A restarted or later run on the same pull request reads the same count.
     const restarted = ledger(dir, 'run-2');
     expect(restarted.correctionsUsed()).toBe(5);
+    expect(claim(restarted, '6')).toEqual({ verdict: 'exhausted', corrections: 5 });
     expect(
-      decide({ review: '6', outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: restarted })
-    ).toEqual({ verdict: 'exhausted', corrections: 5 });
-    expect(
-      decide({ review: '6', outcome: 'reviewed', findings: [], allowCorrection: true, ledger: restarted }).verdict
+      decide({ review: '6', outcome: 'reviewed', findings: [], allowCorrection: true, ledger: restarted })
     ).toBe('clean');
   });
-
-  const claim = (book: Ledger, review: string): { verdict: string; corrections: number } => {
-    const decided = decide({ review, outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: book });
-    return book.recordVerdict({ review, head: `h-${review}`, verdict: decided.verdict, findings: 2, corrections: decided.corrections });
-  };
 
   function fourUsed(): string {
     const dir = scratch();
     const book = ledger(dir, 'run-0');
     for (let cycle = 1; cycle <= MAX_CORRECTIONS - 1; cycle++) {
-      book.append({ event: 'verdict', review: `r${String(cycle)}`, head: `h${String(cycle)}`, verdict: 'correct', findings: 1, corrections: cycle });
+      book.append({ event: 'verdict', review: `r${String(cycle)}`, head: `h${String(cycle)}`, verdict: 'correct', findings: 1 });
       book.append({ event: 'verified', review: `r${String(cycle)}`, head: `h${String(cycle)}` });
     }
     return dir;
   }
 
-  // Two runs on one pull request each read four cycles used before either writes.
+  const correct = (review: string, head = `h-${review}`) =>
+    ({ review, head, verdict: 'correct', findings: 2 }) as const;
+
+  // Two runs on one pull request each decide to correct before either writes.
   it('lets exactly one of two racing runs spend the last correction', () => {
     const dir = fourUsed();
     const a = ledger(dir, 'run-a');
     const b = ledger(dir, 'run-b');
     const input = (review: string, book: Ledger) =>
       ({ review, outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: book }) as const;
-    expect(decide(input('rA', a))).toEqual({ verdict: 'correct', corrections: 5 });
-    expect(decide(input('rB', b))).toEqual({ verdict: 'correct', corrections: 5 });
-    expect(a.recordVerdict({ review: 'rA', head: 'hA', verdict: 'correct', findings: 2, corrections: 5 })).toEqual({
-      verdict: 'correct',
-      corrections: 5,
-    });
-    expect(b.recordVerdict({ review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 })).toEqual({
-      verdict: 'exhausted',
-      corrections: 5,
-    });
+    expect(decide(input('rA', a))).toBe('correct');
+    expect(decide(input('rB', b))).toBe('correct');
+    expect(a.recordVerdict(correct('rA'))).toEqual({ verdict: 'correct', corrections: 5 });
+    expect(b.recordVerdict(correct('rB'))).toEqual({ verdict: 'exhausted', corrections: 5 });
     expect(ledger(dir, 'run-c').correctionsUsed()).toBe(5);
     expect(claim(ledger(dir, 'run-b'), 'rB').verdict).toBe('exhausted');
   });
@@ -519,28 +579,62 @@ describe('routing a review', () => {
     const dir = fourUsed();
     const a = ledger(dir, 'run-a');
     const b = ledger(dir, 'run-b');
-    expect(decide({ review: 'rA', outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: a }).verdict).toBe(
+    expect(decide({ review: 'rA', outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: a })).toBe(
       'correct'
     );
     // B's claim reaches the log after A decided and before A writes its own.
-    b.append({ event: 'verdict', review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 });
-    expect(a.recordVerdict({ review: 'rA', head: 'hA', verdict: 'correct', findings: 2, corrections: 5 })).toEqual({
-      verdict: 'exhausted',
-      corrections: 5,
-    });
-    expect(b.recordVerdict({ review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 }).verdict).toBe(
-      'correct'
-    );
+    b.append({ event: 'verdict', ...correct('rB') });
+    expect(a.recordVerdict(correct('rA'))).toEqual({ verdict: 'exhausted', corrections: 5 });
+    expect(b.recordVerdict(correct('rB')).verdict).toBe('correct');
     expect(b.correctionsUsed()).toBe(5);
+  });
+
+  // Two runs on one head observe the same Copilot review, so both claim its cycle.
+  it('lets one of two runs correct the same review at four used cycles, and the other refuses', () => {
+    const dir = fourUsed();
+    const a = ledger(dir, 'run-a');
+    const b = ledger(dir, 'run-b');
+    expect(claim(a, 'r5')).toEqual({ verdict: 'correct', corrections: 5 });
+    expect(claim(b, 'r5')).toEqual({ verdict: 'claimed', corrections: 5 });
+    expect(b.correctionHolder('r5')).toBe('run-a');
+    expect(ledger(dir, 'run-c').correctionsUsed()).toBe(5);
+    // A resume of the holder keeps its cycle; no other run takes it, nor a sixth.
+    expect(claim(ledger(dir, 'run-a'), 'r5')).toEqual({ verdict: 'correct', corrections: 5 });
+    expect(claim(ledger(dir, 'run-b'), 'r5').verdict).toBe('claimed');
+    expect(claim(ledger(dir, 'run-b'), 'r6').verdict).toBe('exhausted');
+    expect(ledger(dir, 'run-c').correctionsUsed()).toBe(5);
+  });
+
+  it('settles the same review by log order when both claims land before either reads back', () => {
+    const dir = fourUsed();
+    const a = ledger(dir, 'run-a');
+    const b = ledger(dir, 'run-b');
+    // B's claim on r5 reaches the log after A decided and before A writes its own.
+    b.append({ event: 'verdict', ...correct('r5') });
+    expect(a.recordVerdict(correct('r5')).verdict).toBe('claimed');
+    expect(b.recordVerdict(correct('r5')).verdict).toBe('correct');
+    expect(a.correctionsUsed()).toBe(5);
+  });
+
+  it('never reopens a verified correction for a run that lost its review', () => {
+    const dir = scratch();
+    const a = ledger(dir, 'run-a');
+    expect(claim(a, 'r1').verdict).toBe('correct');
+    a.append({ event: 'verified', review: 'r1', head: 'h-r1' });
+    // B decided to correct r1 before A's verification and writes its claim after it.
+    expect(ledger(dir, 'run-b').recordVerdict(correct('r1')).verdict).toBe('claimed');
+    expect(a.unverifiedCorrection()).toBeUndefined();
+    a.append({ event: 'verdict', review: 'r2', head: 'h-r2', verdict: 'clean', findings: 0 });
+    expect(a.ready('h-r2')).toBe(true);
   });
 
   it('gives a losing claim cut short by a crash no cycle on resume', () => {
     const dir = fourUsed();
     const book = ledger(dir);
     expect(claim(book, 'rA').verdict).toBe('correct');
-    book.append({ event: 'verdict', review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 });
+    book.append({ event: 'verdict', ...correct('rB') });
     expect(book.correctionsUsed()).toBe(5);
-    expect(book.holdsCorrection('rB')).toBe(false);
+    expect(book.correctionHolder('rB')).toBeUndefined();
     expect(claim(ledger(dir, 'run-2'), 'rB').verdict).toBe('exhausted');
   });
 
@@ -550,21 +644,21 @@ describe('routing a review', () => {
     // The recheck refused, the run resumed at a fresh review of the corrected head.
     expect(book.unverifiedCorrection()).toBe('r1');
     const fresh = { review: 'r2', outcome: 'reviewed' as const, findings: [], allowCorrection: true, ledger: book };
-    expect(decide(fresh)).toEqual({ verdict: 'correct', corrections: 2 });
-    expect(decide({ ...fresh, allowCorrection: false }).verdict).toBe('blocked');
-    book.append({ event: 'verdict', review: 'r2', head: 'h-r2', verdict: 'clean', findings: 0, corrections: 1 });
+    expect(decide(fresh)).toBe('correct');
+    expect(decide({ ...fresh, allowCorrection: false })).toBe('blocked');
+    book.append({ event: 'verdict', review: 'r2', head: 'h-r2', verdict: 'clean', findings: 0 });
     expect(book.ready('h-r2')).toBe(false);
 
-    expect(claim(book, 'r2').verdict).toBe('correct');
+    expect(claim(book, 'r2')).toEqual({ verdict: 'correct', corrections: 2 });
     book.append({ event: 'verified', review: 'r2', head: 'h-r2' });
     expect(book.unverifiedCorrection()).toBeUndefined();
-    book.append({ event: 'verdict', review: 'r3', head: 'h-r3', verdict: 'clean', findings: 0, corrections: 2 });
+    book.append({ event: 'verdict', review: 'r3', head: 'h-r3', verdict: 'clean', findings: 0 });
     expect(book.ready('h-r3')).toBe(true);
   });
 
   it('blocks findings on a verification-only review', () => {
     expect(
-      decide({ review: '1', outcome: 'reviewed', findings: inline, allowCorrection: false, ledger: ledger() }).verdict
+      decide({ review: '1', outcome: 'reviewed', findings: inline, allowCorrection: false, ledger: ledger() })
     ).toBe('blocked');
   });
 });
@@ -573,11 +667,17 @@ describe('the ledger', () => {
   it('calls a head ready only while its last verdict passes', () => {
     const book = ledger();
     expect(book.ready(HEAD)).toBe(false);
-    book.append({ event: 'verdict', review: '1', head: HEAD, verdict: 'clean', findings: 0, corrections: 0 });
+    book.append({ event: 'verdict', review: '1', head: HEAD, verdict: 'clean', findings: 0 });
     expect(book.ready(HEAD)).toBe(true);
     expect(book.ready(OLD_HEAD)).toBe(false);
-    book.append({ event: 'verdict', review: '2', head: HEAD, verdict: 'unavailable', findings: 0, corrections: 0 });
+    book.append({ event: 'verdict', review: '2', head: HEAD, verdict: 'unavailable', findings: 0 });
     expect(book.ready(HEAD)).toBe(false);
+  });
+
+  it('records nothing for an unnamed run, since claims are settled by run', () => {
+    expect(() => {
+      ledger(scratch(), '').append({ event: 'requested', head: HEAD, receipt: 'attempted' });
+    }).toThrow(/WORKFLOW_ID must be set/);
   });
 
   it('refuses an unreadable line rather than guessing past it', () => {
@@ -635,7 +735,7 @@ describe('the node scripts', () => {
     const state = scratch();
     const book = ledger(state);
     for (let cycle = 1; cycle <= MAX_CORRECTIONS; cycle++) {
-      book.append({ event: 'verdict', review: `r${String(cycle)}`, head: `h${String(cycle)}`, verdict: 'correct', findings: 1, corrections: cycle });
+      book.append({ event: 'verdict', review: `r${String(cycle)}`, head: `h${String(cycle)}`, verdict: 'correct', findings: 1 });
     }
     const run = route(state, {}, [{ id: '77', path: 'src/b.ts', line: 9, url: `${PR_URL}#c77`, body: 'Still racy.' }]);
     expect(run.code).not.toBe(0);
@@ -653,14 +753,14 @@ describe('the node scripts', () => {
     expect(JSON.parse(run.stdout)).toEqual({ action: 'correct', corrections: 1 });
     const report = readFileSync(join(run.artifacts, 'external-review/report.md'), 'utf8');
     expect(report).toContain('Status: correct');
-    expect(report).toContain('Correction cycle 1 of 5 runs next');
+    expect(report).toContain('This run holds a correction cycle, 1 of 5 now in use, and runs it next');
     expect(report).toContain('If the run stopped after this report, one of those stages failed');
     expect(report).toContain('Unverified correction: review 9');
   });
 
   it('runs another cycle on a clean review while an earlier correction is unverified', () => {
     const state = scratch();
-    ledger(state).append({ event: 'verdict', review: '8', head: OLD_HEAD, verdict: 'correct', findings: 1, corrections: 1 });
+    ledger(state).append({ event: 'verdict', review: '8', head: OLD_HEAD, verdict: 'correct', findings: 1 });
     const run = route(state, {});
     expect(run.code).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual({ action: 'correct', corrections: 2 });
@@ -669,6 +769,30 @@ describe('the node scripts', () => {
     expect(readFileSync(join(run.artifacts, 'external-review/report.md'), 'utf8')).toContain(
       'The correction for Copilot review 8 has not passed the internal review'
     );
+  });
+
+  // Two deliveries on one head observed Copilot review 9 with four cycles used.
+  it('lets only the run holding a review correct it; the other refuses before any fix', () => {
+    const state = scratch();
+    const book = ledger(state, 'run-0');
+    for (let cycle = 1; cycle <= MAX_CORRECTIONS - 1; cycle++) {
+      book.append({ event: 'verdict', review: `r${String(cycle)}`, head: `h${String(cycle)}`, verdict: 'correct', findings: 1 });
+      book.append({ event: 'verified', review: `r${String(cycle)}`, head: `h${String(cycle)}` });
+    }
+    const comments = [{ id: '79', path: 'src/d.ts', line: 4, url: `${PR_URL}#c79`, body: 'Leaks a handle.' }];
+    const holder = route(state, { WORKFLOW_ID: 'run-a' }, comments);
+    expect(holder.code).toBe(0);
+    expect(JSON.parse(holder.stdout)).toEqual({ action: 'correct', corrections: 5 });
+
+    const loser = route(state, { WORKFLOW_ID: 'run-b' }, comments);
+    expect(loser.code).not.toBe(0);
+    expect(loser.stdout).toBe('');
+    expect(loser.stderr).toContain('run run-a already holds the correction cycle for this review');
+    expect(readFileSync(join(loser.artifacts, 'external-review/report.md'), 'utf8')).toContain('Status: claimed');
+
+    const resumed = route(state, { WORKFLOW_ID: 'run-a' }, comments);
+    expect(JSON.parse(resumed.stdout)).toEqual({ action: 'correct', corrections: 5 });
+    expect(ledger(state).correctionsUsed()).toBe(5);
   });
 
   it('refuses feedback that describes another review or head', () => {
@@ -765,7 +889,7 @@ describe('the merge paths under the external review gate', () => {
   it('holds a head no passing review covers, and releases a ready one', () => {
     const state = scratch();
     expect(withPolicy(state, () => externalReviewHold(URL, HEAD))).toMatch(/no passing Copilot review .* deliver it through archon-deliver/);
-    ledger(state).append({ event: 'verdict', review: '1', head: HEAD, verdict: 'clean', findings: 0, corrections: 0 });
+    ledger(state).append({ event: 'verdict', review: '1', head: HEAD, verdict: 'clean', findings: 0 });
     expect(withPolicy(state, () => externalReviewHold(URL, HEAD))).toBeUndefined();
     expect(withPolicy(state, () => externalReviewHold(URL, OLD_HEAD))).toMatch(/no passing Copilot review/);
   });
@@ -791,6 +915,96 @@ describe('the merge paths under the external review gate', () => {
     expect(run.gh.some(call => call.startsWith('pr merge'))).toBe(false);
   });
 
+  // A PR branch whose base moved after the review by a file the change does not touch.
+  function landCheckout(baseMoves: boolean): { work: string; origin: string; sha: string } {
+    const root = scratch();
+    const origin = join(root, 'origin.git');
+    const work = join(root, 'work');
+    git(root, 'init', '--quiet', '--bare', origin);
+    git(root, 'init', '--quiet', '-b', 'dev', work);
+    git(work, 'remote', 'add', 'origin', origin);
+    const commit = (file: string): void => {
+      writeFileSync(join(work, file), `${file}\n`);
+      git(work, 'add', file);
+      git(work, 'commit', '--quiet', '-m', file);
+    };
+    commit('base.txt');
+    git(work, 'push', '--quiet', 'origin', 'dev');
+    git(work, 'checkout', '--quiet', '-b', 'feature');
+    commit('feature.txt');
+    const sha = git(work, 'rev-parse', 'HEAD');
+    git(work, 'push', '--quiet', 'origin', 'feature', 'feature:refs/pull/42/head');
+    if (baseMoves) {
+      git(work, 'checkout', '--quiet', 'dev');
+      commit('other.txt');
+      git(work, 'push', '--quiet', 'origin', 'dev');
+      git(work, 'checkout', '--quiet', 'feature');
+    }
+    return { work, origin, sha };
+  }
+
+  function land(checkout: { work: string; sha: string }, state: string, mode: string): ScriptRun {
+    const url = `https://github.com/${REF.repo.path}/pull/42`;
+    return runPackScript('loop/scripts/land', {
+      cwd: checkout.work,
+      gh: { pr: { headRefOid: checkout.sha, headRefName: 'feature', baseRefName: 'dev' } },
+      inputs: {
+        INPUTS_PR: url,
+        INPUTS_SHA: checkout.sha,
+        INPUTS_ROUTE: 'simple',
+        INPUTS_FILES: 'feature.txt',
+        INPUTS_REPORT: JSON.stringify({ pr: url, head: checkout.sha, overall: 'PASS', lines: [] }),
+        ARCHON_SDLC_EXTERNAL_REVIEW: mode,
+        ARCHON_SDLC_GITHUB_LOGIN: 'shami13',
+        STATE_DIR: state,
+        ...GIT_ISOLATION,
+      },
+    });
+  }
+
+  function passed(state: string, head: string): void {
+    Ledger.forPull(state, { ...REF, number: 42 }, 'run-1').append({
+      event: 'verdict',
+      review: '1',
+      head,
+      verdict: 'clean',
+      findings: 0,
+    });
+  }
+
+  it('merges a reviewed head whose base has not moved', () => {
+    const checkout = landCheckout(false);
+    const state = scratch();
+    passed(state, checkout.sha);
+    const run = land(checkout, state, 'copilot');
+    expect(run.gh).toContain(
+      `pr merge https://github.com/${REF.repo.path}/pull/42 --squash --match-head-commit ${checkout.sha}`
+    );
+  });
+
+  it('refuses a moved base without pushing a merge no Copilot review covers', () => {
+    const checkout = landCheckout(true);
+    const state = scratch();
+    passed(state, checkout.sha);
+    const run = land(checkout, state, 'copilot');
+    expect(run.code).toBe(0);
+    const result = JSON.parse(run.stdout) as { outcome: string; reason: string };
+    expect(result.outcome).toBe('refused');
+    expect(result.reason).toContain('dev has moved past the reviewed head');
+    expect(result.reason).toContain('through archon-deliver');
+    expect(run.gh.some(call => call.startsWith('pr merge'))).toBe(false);
+    expect(git(checkout.origin, 'rev-parse', 'refs/heads/feature')).toBe(checkout.sha);
+  });
+
+  it('still merges a moved base in first when the gate is off', () => {
+    const checkout = landCheckout(true);
+    const run = land(checkout, scratch(), 'none');
+    const pushed = git(checkout.origin, 'rev-parse', 'refs/heads/feature');
+    expect(pushed).not.toBe(checkout.sha);
+    expect(git(checkout.origin, 'rev-parse', `${pushed}^1`)).toBe(checkout.sha);
+    expect(run.gh.some(call => call.startsWith(`pr merge https://github.com/${REF.repo.path}/pull/42 --squash --match-head-commit ${pushed}`))).toBe(true);
+  });
+
   it('holds what it cannot confirm', () => {
     expect(withPolicy(scratch(), () => externalReviewHold('https://ghe.example.com/o/r/pull/1', HEAD))).toMatch(
       /could not confirm .*github.com only/
@@ -800,16 +1014,22 @@ describe('the merge paths under the external review gate', () => {
 });
 
 describe('the YAML vocabulary the scripts share', () => {
+  interface Node {
+    id: string;
+    output_format?: { properties: Record<string, { enum?: string[] }> };
+    loop_group?: { nodes: Node[] };
+  }
   const deliver = Bun.YAML.parse(
     readFileSync(join(import.meta.dir, '../../workflows/sdlc/deliver/archon-deliver.yaml'), 'utf8')
-  ) as { nodes: { id: string; loop_group?: { nodes: { id: string; output_format?: { properties: Record<string, { enum?: string[] }> } }[] } }[] };
+  ) as { nodes: Node[] };
   const body = deliver.nodes.find(node => node.id === 'external-review')?.loop_group?.nodes ?? [];
-  const property = (id: string, name: string): string[] | undefined =>
-    body.find(node => node.id === id)?.output_format?.properties[name]?.enum;
+  const property = (nodes: readonly Node[], id: string, name: string): string[] | undefined =>
+    nodes.find(node => node.id === id)?.output_format?.properties[name]?.enum;
 
-  it('declares the route actions and triage outcomes the scripts accept', () => {
-    expect(property('external-route', 'action')).toEqual([...ROUTE_ACTIONS]);
-    expect(property('external-triage', 'outcome')).toEqual([...TRIAGE_OUTCOMES]);
+  it('declares the policy modes, route actions and triage outcomes the scripts accept', () => {
+    expect(property(deliver.nodes, 'external-review-policy', 'mode')).toEqual([...EXTERNAL_REVIEW_MODES]);
+    expect(property(body, 'external-route', 'action')).toEqual([...ROUTE_ACTIONS]);
+    expect(property(body, 'external-triage', 'outcome')).toEqual([...TRIAGE_OUTCOMES]);
   });
 });
 

@@ -39,18 +39,26 @@ export const MAX_CORRECTIONS = 5;
 export const REVIEW_WAIT_MS = 30 * 60_000;
 export const POLL_INTERVAL_MS = 30_000;
 
+/** The policy node's `mode`, first the default. */
+export const EXTERNAL_REVIEW_MODES = ['none', 'copilot'] as const;
+export type ExternalReviewMode = (typeof EXTERNAL_REVIEW_MODES)[number];
+
 export type ExternalReviewPolicy =
-  | { readonly mode: 'none' }
-  | { readonly mode: 'copilot'; readonly login: string };
+  | { readonly mode: Exclude<ExternalReviewMode, 'copilot'> }
+  | { readonly mode: Extract<ExternalReviewMode, 'copilot'>; readonly login: string };
+
+function isMode(value: string): value is ExternalReviewMode {
+  return (EXTERNAL_REVIEW_MODES as readonly string[]).includes(value);
+}
 
 export function externalReviewPolicy(): ExternalReviewPolicy {
-  const selected = (process.env.ARCHON_SDLC_EXTERNAL_REVIEW ?? '').trim();
-  if (selected === '' || selected === 'none') return { mode: 'none' };
-  if (selected !== 'copilot') {
+  const selected = (process.env.ARCHON_SDLC_EXTERNAL_REVIEW ?? '').trim() || EXTERNAL_REVIEW_MODES[0];
+  if (!isMode(selected)) {
     throw new Error(
-      `ARCHON_SDLC_EXTERNAL_REVIEW must be "none" (the default) or "copilot", not "${selected}"`
+      `ARCHON_SDLC_EXTERNAL_REVIEW must be one of ${EXTERNAL_REVIEW_MODES.map(mode => `"${mode}"`).join(', ')} (the first is the default), not "${selected}"`
     );
   }
+  if (selected === 'none') return { mode: selected };
   const login = (process.env.ARCHON_SDLC_GITHUB_LOGIN ?? '').trim();
   if (login === '') {
     throw new Error(
@@ -282,6 +290,7 @@ export const VERDICTS = [
   'correct',
   'unavailable',
   'exhausted',
+  'claimed',
   'blocked',
 ] as const;
 export type Verdict = (typeof VERDICTS)[number];
@@ -296,6 +305,8 @@ export const TRIAGE_OUTCOMES = ['reviewed', 'unavailable'] as const;
 /**
  * A request is `attempted` before the POST and `accepted` once GitHub's receipt is
  * read, so a crash or a lost response between the two never sends a second request.
+ * The first `attempted` for a head owns its request; a later one, from a run that
+ * raced it, sends nothing.
  */
 export const RECEIPTS = ['attempted', 'accepted'] as const;
 export type Receipt = (typeof RECEIPTS)[number];
@@ -312,7 +323,6 @@ export type LedgerEvent =
       readonly head: string;
       readonly verdict: Verdict;
       readonly findings: number;
-      readonly corrections: number;
     })
   | (Stamp & { readonly event: 'verified'; readonly review: string; readonly head: string });
 
@@ -336,8 +346,7 @@ function parseEvent(line: string, index: number, path: string): LedgerEvent {
       (value.event === 'verdict' &&
         text(value.review) &&
         (VERDICTS as readonly unknown[]).includes(value.verdict) &&
-        typeof value.findings === 'number' &&
-        typeof value.corrections === 'number'));
+        typeof value.findings === 'number'));
   if (!valid) throw new Error(`the external review ledger ${path} has an unreadable line ${String(index + 1)}`);
   return value as unknown as LedgerEvent;
 }
@@ -345,9 +354,10 @@ function parseEvent(line: string, index: number, path: string): LedgerEvent {
 /**
  * One pull request's append-only event log. Appends of one short line stay whole
  * under concurrent writers, so two runs on the same pull request lose no event and
- * read back one order; every fact is folded from the whole log on read. A decision
- * that spends budget is settled by that order (`recordVerdict`), never by a count
- * read before the write.
+ * read back one order; every fact is folded from the whole log on read. A claim on
+ * something only one run may do, the review request and a correction cycle, is
+ * appended first and settled by that order (`claimRequest`, `recordVerdict`), never
+ * by a state read before the write. That is why every event names its run.
  */
 export class Ledger {
   constructor(
@@ -379,6 +389,9 @@ export class Ledger {
   }
 
   append(event: Unstamped<LedgerEvent>): void {
+    if (this.run === '') {
+      throw new Error(`no run is named for ${this.path}; claims are settled by run, so WORKFLOW_ID must be set`);
+    }
     mkdirSync(dirname(this.path), { recursive: true });
     const stamped = { ...event, at: new Date(this.now()).toISOString(), run: this.run };
     appendFileSync(this.path, `${JSON.stringify(stamped)}\n`);
@@ -390,6 +403,13 @@ export class Ledger {
       event.event === 'requested' && event.head === head ? [event.receipt] : []
     );
     return receipts.includes('accepted') ? 'accepted' : receipts.at(0);
+  }
+
+  /** Record an attempt to request a review of `head`; true when this run's attempt came first. */
+  claimRequest(head: string): boolean {
+    this.append({ event: 'requested', head, receipt: 'attempted' });
+    const first = this.events().find(event => event.event === 'requested' && event.head === head);
+    return first?.run === this.run;
   }
 
   verified(review: string): boolean {
@@ -407,20 +427,19 @@ export class Ledger {
   }
 
   /**
-   * The reviews that hold a correction cycle: the first five distinct reviews, in log
-   * order, with a `correct` verdict. A rerun of one cycle counts once, and a claim
-   * that lost the race for the last cycle holds none.
+   * The reviews that hold a correction cycle, each with the run that holds it: the
+   * first five distinct reviews, in log order, with a `correct` verdict, held by the
+   * run of that first claim. A resumed run keeps its own cycle; another run's claim
+   * on the same review, or on a sixth, holds none.
    */
-  private admitted(): Set<string> {
-    const admitted = new Set<string>();
+  private admitted(): Map<string, string> {
+    const admitted = new Map<string, string>();
     for (const event of this.verdicts()) {
-      if (event.verdict === 'correct' && admitted.size < MAX_CORRECTIONS) admitted.add(event.review);
+      if (event.verdict === 'correct' && !admitted.has(event.review) && admitted.size < MAX_CORRECTIONS) {
+        admitted.set(event.review, event.run);
+      }
     }
     return admitted;
-  }
-
-  holdsCorrection(review: string): boolean {
-    return this.admitted().has(review);
   }
 
   correctionsUsed(): number {
@@ -437,7 +456,7 @@ export class Ledger {
     const admitted = this.admitted();
     let open: string | undefined;
     for (const event of this.events()) {
-      if (event.event === 'verdict' && event.verdict === 'correct' && admitted.has(event.review)) {
+      if (event.event === 'verdict' && event.verdict === 'correct' && admitted.get(event.review) === event.run) {
         open = event.review;
       } else if (event.event === 'verified' && event.review === open) {
         open = undefined;
@@ -447,23 +466,31 @@ export class Ledger {
   }
 
   /**
-   * Record a route verdict. A `correct` verdict is a claim on a correction cycle and
-   * the log's order settles it: two runs that both read four cycles used both append,
-   * both read back the same order, and exactly one holds the fifth. The other records
-   * `exhausted`. A crash between those two appends leaves a claim the fold already
-   * discounts.
+   * Record a route verdict. A `correct` verdict is a claim on a correction cycle, and
+   * this ledger alone settles it, by the log's order: two runs that both decided to
+   * correct both append and read back the same order. Only the run that holds the
+   * review's cycle corrects. A run that lost that review to another run records
+   * `claimed`; one that found every cycle held records `exhausted`. A crash between
+   * those two appends leaves a claim the fold already discounts.
    */
   recordVerdict(event: Omit<Extract<LedgerEvent, { event: 'verdict' }>, keyof Stamp | 'event'>): {
     verdict: Verdict;
     corrections: number;
   } {
     this.append({ event: 'verdict', ...event });
-    if (event.verdict !== 'correct' || this.holdsCorrection(event.review)) {
-      return { verdict: event.verdict, corrections: this.correctionsUsed() };
+    const admitted = this.admitted();
+    const holder = admitted.get(event.review);
+    if (event.verdict !== 'correct' || holder === this.run) {
+      return { verdict: event.verdict, corrections: admitted.size };
     }
-    const corrections = this.correctionsUsed();
-    this.append({ event: 'verdict', ...event, verdict: 'exhausted', corrections });
-    return { verdict: 'exhausted', corrections };
+    const verdict = holder === undefined ? 'exhausted' : 'claimed';
+    this.append({ event: 'verdict', ...event, verdict });
+    return { verdict, corrections: admitted.size };
+  }
+
+  /** The run that holds the correction cycle for `review`, if any does. */
+  correctionHolder(review: string): string | undefined {
+    return this.admitted().get(review);
   }
 
   /**
@@ -517,7 +544,8 @@ export interface ObserveOptions {
 
 /**
  * Wait for a submitted Copilot review of exactly `head`, requesting one at most
- * once per head.
+ * once per head across every run: a run whose claim on the request came second
+ * waits for the review the first one asked for.
  *
  * A pending request is never a verdict: while Copilot is still a requested
  * reviewer, even an earlier review of the same head is not yet the latest word. A
@@ -551,8 +579,7 @@ export async function observeCopilotReview(
           `Copilot's latest review of ${head} (${latest.url}) did not review the change, and no new review is pending; request a Copilot review on the pull request, then resume this run`
         );
       }
-      if (ledger.request(head) === undefined) {
-        ledger.append({ event: 'requested', head, receipt: 'attempted' });
+      if (ledger.request(head) === undefined && ledger.claimRequest(head)) {
         try {
           requestCopilot(github, ref, head);
         } catch (error) {
@@ -625,8 +652,8 @@ export interface RouteInput {
 }
 
 /**
- * What the review on the current head lets delivery do, before `recordVerdict`
- * settles a new claim on a correction cycle.
+ * What the review on the current head lets delivery do. `correct` is only a claim:
+ * `recordVerdict` decides whether this run may spend a cycle on it.
  *
  * `adjudicated` is the one passing verdict with findings: the correction cycle for
  * this exact review already ran, changed nothing because every finding was declined
@@ -635,16 +662,12 @@ export interface RouteInput {
  * an earlier correction waits for its internal review: that cycle's blockers are
  * still open, however clean the newer review is.
  */
-export function decide(input: RouteInput): { verdict: Verdict; corrections: number } {
-  const used = input.ledger.correctionsUsed();
-  if (input.outcome === 'unavailable') return { verdict: 'unavailable', corrections: used };
+export function decide(input: RouteInput): Verdict {
+  if (input.outcome === 'unavailable') return 'unavailable';
   const settled = input.ledger.unverifiedCorrection() === undefined;
-  if (settled && input.findings.length === 0) return { verdict: 'clean', corrections: used };
-  if (settled && input.ledger.verified(input.review)) return { verdict: 'adjudicated', corrections: used };
-  if (!input.allowCorrection) return { verdict: 'blocked', corrections: used };
-  if (input.ledger.holdsCorrection(input.review)) return { verdict: 'correct', corrections: used };
-  if (used >= MAX_CORRECTIONS) return { verdict: 'exhausted', corrections: used };
-  return { verdict: 'correct', corrections: used + 1 };
+  if (settled && input.findings.length === 0) return 'clean';
+  if (settled && input.ledger.verified(input.review)) return 'adjudicated';
+  return input.allowCorrection ? 'correct' : 'blocked';
 }
 
 // ── Artifacts ─────────────────────────────────────────────────────────────
@@ -738,7 +761,7 @@ export interface ReportState {
 function historyLine(event: LedgerEvent): string {
   switch (event.event) {
     case 'verdict':
-      return `- ${event.at} review ${event.review} of ${event.head}: ${event.verdict} (${String(event.findings)} findings, ${String(event.corrections)}/${String(MAX_CORRECTIONS)} corrections)`;
+      return `- ${event.at} review ${event.review} of ${event.head}: ${event.verdict} by run ${event.run} (${String(event.findings)} findings)`;
     case 'requested':
       return `- ${event.at} review request for ${event.head}: ${event.receipt}`;
     case 'verified':

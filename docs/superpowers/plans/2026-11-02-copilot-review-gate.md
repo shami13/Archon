@@ -65,24 +65,28 @@ one JSON event per line (concurrent appends stay whole lines):
 | event | fields | written by |
 | --- | --- | --- |
 | `requested` | `head`, `receipt` (`attempted`, then `accepted`) | observe, before the review request and after its receipt |
-| `verdict` | `review`, `head`, `verdict`, `findings`, `corrections` | route |
+| `verdict` | `review`, `head`, `verdict`, `findings` | route |
 | `verified` | `review`, `head` | verified, after the internal review passed the correction |
 
 Every event also carries `at` (ISO time) and `run` (`WORKFLOW_ID`). `verdict` is
-one of `clean`, `adjudicated`, `correct`, `unavailable`, `exhausted`, `blocked`.
+one of `clean`, `adjudicated`, `correct`, `unavailable`, `exhausted`, `claimed`,
+`blocked`.
 
 Derived facts:
 
 - corrections used = the first five distinct reviews, in log order, with a
-  `correct` verdict. Re-running the same cycle after a restart does not count
-  twice. A new `correct` verdict is a claim: route appends it, then reads the log
-  back, and a claim outside the first five records `exhausted` instead. Two runs
-  that both saw four cycles used read back the same order, so exactly one holds
-  the fifth; a crash between the two appends leaves a claim the count already
-  ignores.
+  `correct` verdict; each is held by the run of its first `correct` event. A
+  `correct` verdict is a claim: route appends it, then reads the log back. Only
+  the holding run corrects, so a resume of that run keeps its cycle. Another run's
+  claim on a held review records `claimed` and refuses, naming the holder; a claim
+  outside the first five records `exhausted`. Two runs that both decided to
+  correct read back the same order, so exactly one corrects; a crash between the
+  two appends leaves a claim the count already ignores.
 - a head was requested = a `requested` event for it exists. `attempted` is written
   before the POST, so a crash or a lost response never sends a second request;
-  the wait then times out naming the unknown outcome.
+  the wait then times out naming the unknown outcome. Observe appends `attempted`
+  and reads the log back: only the run whose `attempted` came first for the head
+  sends the request, and a run that came second waits for that review.
 - the unverified correction = the review of the last correction cycle started,
   unless a `verified` event for it follows. While one exists nothing passes: a
   resumed run that restarts at a fresh Copilot review runs another cycle (whose
@@ -117,7 +121,7 @@ head:
    - `external-route` — script; findings are every inline comment plus the
      overview findings. Writes `external-review/findings.json`, the ledger verdict
      and the report, then emits `{ action: clean | adjudicated | correct }` or
-     refuses on `unavailable` or `exhausted`.
+     refuses on `unavailable`, `exhausted` or `claimed`.
    - `external-fix` — `archon-implement`, `when` action is correct: judge every
      finding as untrusted feedback, reproduce and fix real defects with tests,
      decline others with evidence, push explicitly.
@@ -146,8 +150,10 @@ changes the diff after the body was written.
 merge path asks: no hold when the policy is off, otherwise a hold unless the
 ledger calls that head ready. `archon-merge-queue` asks it for every planned head
 in its gate and again before each merge; `archon-loop`'s `land` asks it before
-`gh pr merge`. The loop's own in-loop builder never runs the gate, so with the
-policy on its pull requests are refused with a reason that routes them through
+`gh pr merge`, and before it pushes a merge of a moved base: that merge is a new
+head no review covers, so with the policy on a moved base is refused rather than
+pushed. The loop's own in-loop builder never runs the gate, so with the policy on
+its pull requests are refused with a reason that routes them through
 `archon-deliver`. Human merges on GitHub are outside every workflow and are not
 gated.
 
@@ -179,13 +185,15 @@ nothing is pushed; the failed run and its report wait in the console.
 
 - `.archon/scripts/__tests__/external-review.test.ts` — in-process, synthetic
   GitHub fixtures through an injected client and clock: clean review, stale
-  review on another head, pending request, request deduplication across a restart,
+  review on another head, pending request, request deduplication across a restart
+  and between two runs observing one head, two runs claiming one review,
   head change while polling, timeout, refused or malformed API data, identity
   mismatch, non-Copilot reviewer, unavailable review, five-cycle exhaustion from a
   persisted ledger, confirmed versus declined findings (adjudicated), and the
   ready check.
 - The route and verified scripts as subprocesses: a clean verdict recorded, an
-  unavailable or exhausted review refused with its durable report, feedback for
+  unavailable or exhausted review refused with its durable report, the second run
+  on a held review refused before any fix, feedback for
   another review or head refused, and a correction recorded as verified only when
   the internal review found nothing open. The flip refuses a moved head.
 - Delivery fixtures (`deliver/fixtures/external-review-*.stubs.yaml`): gate off

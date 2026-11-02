@@ -182,7 +182,7 @@ Delivery can require a Copilot review of the exact pushed head after the interna
 review converges (`ARCHON_SDLC_EXTERNAL_REVIEW=copilot`, with
 `ARCHON_SDLC_GITHUB_LOGIN`; off by default). [`.shared/external-review.ts`](.shared/external-review.ts)
 owns the policy, the Copilot identity, and the per-pull-request ledger under
-`$STATE_DIR` that bounds corrections to five across restarts and runs. Three rules
+`$STATE_DIR` that bounds corrections to five across restarts and runs. Four rules
 hold it together:
 
 - **Review state is not a verdict.** Copilot submits `COMMENTED` whether it found
@@ -197,13 +197,25 @@ hold it together:
   waits, the ready check re-reads the head against the ledger, and the flip compares
   it once more. A CI correction after the review gets a verification-only review of
   its own.
-
-- **The budget is settled by the ledger's order.** A new correction is a claim
-  appended to the log; the first five distinct claims hold the cycles, so two runs
-  racing for the last one cannot both spend it. A correction the internal review
-  did not pass keeps the pull request unready until a later cycle passes.
+- **Claims are settled by the ledger's order.** The review request and each
+  correction are claims appended to the log and read back. The first request claim
+  for a head sends it; a run that came second waits for that review. The first five
+  distinct reviews claimed hold the cycles, each for the run that claimed it first:
+  two runs on one review do not both correct it, two racing for the last cycle do
+  not both spend it, and a resumed run keeps its own. A correction the internal
+  review did not pass keeps the pull request unready until a later cycle passes.
 
 Merge paths ask the same ledger: `archon-merge-queue` and `archon-loop`'s `land`
 hold a head no passing Copilot review covers, which routes loop-built work through
-delivery. Its GitHub operations use `gh` whichever forge source the run selected,
-as issue writes do: the forge contract has no review-request operation.
+delivery. With the gate on, `land` refuses a moved base instead of pushing a merge
+of it, since that merge is a head no Copilot review covers. A hold clears once a
+delivery records a passing review of that exact head.
+
+When the gate stops a delivery, `external-review/report.md` in the run's artifacts
+names the pull request, head, review, cycles used, open findings and the reason,
+and the refusal says what clears it: resume the run once a review has arrived, or
+request a new Copilot review first when the last one was unavailable or another
+run holds the cycle.
+
+The gate's GitHub operations use `gh` whichever forge source the run selected, as
+issue writes do: the forge contract has no review-request operation.

@@ -6,7 +6,7 @@
  * and every request the gate makes is visible. The node scripts run as
  * subprocesses only where the script's own refusal and report are the subject.
  */
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,6 +19,7 @@ import {
   decide,
   externalReviewPolicy,
   findingsOf,
+  ghApi,
   observeCopilotReview,
   type GitHub,
   type GitHubRequest,
@@ -84,7 +85,6 @@ class FakeGitHub {
     }
     const base = `repos/${REF.repo.path}/pulls/${String(REF.number)}`;
     const path = request.path.split('?')[0];
-    const page = Number(new URLSearchParams(request.path.split('?')[1] ?? '').get('page') ?? '1');
     if (path === 'user') return { login: this.login };
     if (path === base) {
       return { state: this.state, head: { sha: this.head }, requested_reviewers: this.requested };
@@ -93,9 +93,9 @@ class FakeGitHub {
       if (this.requestListsCopilot) this.requested = [COPILOT_REQUESTED];
       return { requested_reviewers: this.requested };
     }
-    if (path === `${base}/reviews`) return page === 1 ? this.reviews : [];
+    if (path === `${base}/reviews` && request.list) return [this.reviews];
     const comments = /\/reviews\/(\d+)\/comments$/.exec(path);
-    if (comments) return page === 1 ? (this.comments.get(Number(comments[1])) ?? []) : [];
+    if (comments && request.list) return [this.comments.get(Number(comments[1])) ?? []];
     throw new Error(`unexpected request ${request.path}`);
   };
 
@@ -257,6 +257,67 @@ describe('observing the Copilot review of the current head', () => {
     });
     expect(observed.review.id).toBe('31');
     expect(github.posts()).toBe(0);
+  });
+});
+
+describe('the gh transport', () => {
+  /** Runs `body` with `gh` answered by `answer`; every gh argv is returned in call order. */
+  function withGh(answer: (argv: string[]) => string, body: () => void): string[][] {
+    const calls: string[][] = [];
+    const spawn = spyOn(Bun, 'spawnSync').mockImplementation(((argv: string[]) => {
+      calls.push(argv);
+      return { exitCode: 0, stdout: Buffer.from(answer(argv)), stderr: Buffer.from('') };
+    }) as unknown as typeof Bun.spawnSync);
+    try {
+      body();
+    } finally {
+      spawn.mockRestore();
+    }
+    return calls;
+  }
+
+  it('lists through gh pagination and posts its body from a file it removes', () => {
+    let payload = '';
+    let payloadPath = '';
+    const calls = withGh(
+      argv => {
+        if (argv.includes('--slurp')) return '[[{"id":1}],[{"id":2}]]';
+        payloadPath = argv[argv.indexOf('--input') + 1] ?? '';
+        payload = readFileSync(payloadPath, 'utf8');
+        return '{"number":7}';
+      },
+      () => {
+        expect(ghApi({ path: 'repos/example/repo/pulls/7/reviews?per_page=100', list: true })).toEqual([
+          [{ id: 1 }],
+          [{ id: 2 }],
+        ]);
+        expect(
+          ghApi({ method: 'POST', path: 'repos/example/repo/pulls/7/requested_reviewers', body: { reviewers: ['x'] } })
+        ).toEqual({ number: 7 });
+      }
+    );
+    expect(calls[0]).toEqual([
+      'gh', 'api', '--hostname', 'github.com', 'repos/example/repo/pulls/7/reviews?per_page=100', '--paginate', '--slurp',
+    ]);
+    expect(calls[1]?.slice(0, 7)).toEqual([
+      'gh', 'api', '--hostname', 'github.com', 'repos/example/repo/pulls/7/requested_reviewers', '--method', 'POST',
+    ]);
+    expect(JSON.parse(payload)).toEqual({ reviewers: ['x'] });
+    expect(existsSync(payloadPath)).toBe(false);
+  });
+
+  it('refuses a listing that is not pages of rows', async () => {
+    const github = new FakeGitHub();
+    const api: GitHub = request => (request.list ? [{ id: 1 }] : github.api(request));
+    const observed = observeCopilotReview(REF, HEAD, {
+      github: api,
+      ledger: ledger(),
+      now: () => 0,
+      sleep: () => Promise.resolve(),
+      waitMs: 30 * MINUTE,
+      pollMs: 30_000,
+    });
+    expect(await refusal(observed)).toMatch(/unexpected payload for .*\/reviews/);
   });
 });
 

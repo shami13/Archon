@@ -30,7 +30,7 @@ import { artifactsDir, emit, refuse, runId, stateDir } from '../../.shared/io.ts
 
 const boundPr = process.env.INPUTS_PR;
 
-async function observe(): Promise<void> {
+try {
   const ref = parseQualifiedPr(boundPr);
   const ledger = Ledger.forPull(stateDir(), ref, runId());
   let head: string | undefined;
@@ -38,17 +38,16 @@ async function observe(): Promise<void> {
     const policy = externalReviewPolicy();
     if (policy.mode !== 'copilot') throw new Error('the external review gate is off for this run');
     assertCopilotHost(ref);
-    const github = ghApi(ref.repo.host);
-    assertIdentity(github, policy.login);
+    assertIdentity(ghApi, policy.login);
     head = nodeStartCommit();
-    const remote = readPull(github, ref).head;
+    const remote = readPull(ghApi, ref).head;
     if (remote !== head) {
       throw new Error(
         `the checkout is at ${head} but the pull request head is ${remote}; push this run's commits before requesting a review`
       );
     }
     const observed = await observeCopilotReview(ref, head, {
-      github,
+      github: ghApi,
       ledger,
       now: Date.now,
       sleep: ms => Bun.sleep(ms),
@@ -66,10 +65,8 @@ async function observe(): Promise<void> {
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     writeReport(artifactsDir(), ledger, { ref, status: 'stopped while observing', reason, head });
-    refuse(`external-observe: ${reason}`);
+    throw error;
   }
-}
-
-await observe().catch((error: unknown) => {
+} catch (error) {
   refuse(`external-observe: ${error instanceof Error ? error.message : String(error)}`);
-});
+}

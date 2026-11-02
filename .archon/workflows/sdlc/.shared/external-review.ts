@@ -29,6 +29,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { runGh } from './claims.ts';
 import { record, type QualifiedPr } from './forge.ts';
 
 export const MAX_CORRECTIONS = 5;
@@ -89,47 +90,32 @@ export interface GitHubRequest {
   readonly method?: 'GET' | 'POST';
   readonly path: string;
   readonly body?: Record<string, unknown>;
+  /** A list endpoint: every page, as an array of pages. */
+  readonly list?: boolean;
 }
 
 /** One REST call that returns parsed JSON or throws with GitHub's own words. */
 export type GitHub = (request: GitHubRequest) => unknown;
 
-export function ghApi(host: string): GitHub {
-  return request => {
-    const args = ['api', '--hostname', host];
-    let directory: string | undefined;
-    if (request.method === 'POST') {
-      directory = mkdtempSync(join(tmpdir(), 'archon-external-review-'));
-      const payload = join(directory, 'request.json');
-      writeFileSync(payload, JSON.stringify(request.body ?? {}), { mode: 0o600 });
-      args.push('--method', 'POST', '--input', payload);
-    }
-    try {
-      // Captured, never inherited: a node's stderr reaches the operator, and gh is
-      // chatty there.
-      const result = Bun.spawnSync(['gh', ...args, request.path], { stdout: 'pipe', stderr: 'pipe' });
-      if (result.exitCode !== 0) {
-        throw new Error(`gh api ${request.path} failed: ${result.stderr.toString().trim()}`);
-      }
-      try {
-        return JSON.parse(result.stdout.toString()) as unknown;
-      } catch {
-        throw new Error(`gh api ${request.path} returned invalid JSON`);
-      }
-    } finally {
-      if (directory) rmSync(directory, { recursive: true, force: true });
-    }
-  };
-}
-
-function pages(github: GitHub, path: string): unknown[] {
-  const rows: unknown[] = [];
-  for (let page = 1; ; page++) {
-    const batch = github({ path: `${path}?per_page=100&page=${String(page)}` });
-    if (!Array.isArray(batch)) throw new Error(`GitHub returned an unexpected payload for ${path}`);
-    rows.push(...(batch as unknown[]));
-    if (batch.length < 100) return rows;
+export const ghApi: GitHub = request => {
+  if (request.list) return runGh([request.path, '--paginate', '--slurp']);
+  if (request.method !== 'POST') return runGh([request.path]);
+  const directory = mkdtempSync(join(tmpdir(), 'archon-external-review-'));
+  try {
+    const payload = join(directory, 'request.json');
+    writeFileSync(payload, JSON.stringify(request.body ?? {}), { mode: 0o600 });
+    return runGh([request.path, '--method', 'POST', '--input', payload]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
+};
+
+function list(github: GitHub, path: string): unknown[] {
+  const pages = github({ path: `${path}?per_page=100`, list: true });
+  if (!Array.isArray(pages) || !pages.every((page): page is unknown[] => Array.isArray(page))) {
+    throw new Error(`GitHub returned an unexpected payload for ${path}`);
+  }
+  return pages.flat();
 }
 
 /** Refuses unless the token the gate runs with belongs to the configured login. */
@@ -233,7 +219,7 @@ export interface ReviewComment {
 }
 
 function reviewComments(github: GitHub, ref: QualifiedPr, review: string): ReviewComment[] {
-  return pages(
+  return list(
     github,
     `repos/${ref.repo.path}/pulls/${String(ref.number)}/reviews/${review}/comments`
   ).map(value => {
@@ -446,7 +432,7 @@ export async function observeCopilotReview(
       );
     }
     if (!pull.pending) {
-      const latest = latestReviewOf(copilotReviews(pages(github, reviewsPath)), head);
+      const latest = latestReviewOf(copilotReviews(list(github, reviewsPath)), head);
       if (latest && !ledger.hasVerdict(latest.id, 'unavailable')) {
         return { review: latest, comments: reviewComments(github, ref, latest.id) };
       }

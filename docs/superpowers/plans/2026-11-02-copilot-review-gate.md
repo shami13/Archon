@@ -30,7 +30,10 @@ boundary, opt-in per project.
 - A review is requested with `POST repos/{owner}/{repo}/pulls/{n}/requested_reviewers`
   and body `{"reviewers":["copilot-pull-request-reviewer[bot]"]}` (GitHub's Copilot
   code review documentation). A request can be accepted and still produce no
-  review; only the bounded wait can tell.
+  review; only the bounded wait can tell. An accepted request can also answer with
+  an empty `requested_reviewers` list and the review arrives later (observed live),
+  so that list is not evidence either way; the receipt is bound by its pull
+  request number and head only.
 - Project `.archon/config.yaml` `env:` reaches `script:` nodes on every launch
   path (CLI and Web read the same project config), and `~/.archon/.env` reaches
   them through the host environment.
@@ -47,7 +50,12 @@ boundary, opt-in per project.
   issue writes use `gh`.
 
 Darunki enables it with `env:` in its project config (operator activation, not
-part of this change).
+part of this change). The per-codebase environment variables the console's
+project settings store are an equivalent switch: run preflight merges them over
+the config's `env:`, so they reach script nodes on CLI and Web launches without a
+committed file. Whichever holds the switch must be protected from the work the
+gate reviews: an application change that edits `.archon/config.yaml` could
+otherwise turn its own gate off.
 
 ## Persisted state
 
@@ -56,7 +64,7 @@ one JSON event per line (concurrent appends stay whole lines):
 
 | event | fields | written by |
 | --- | --- | --- |
-| `requested` | `head` | observe, after a verified review request |
+| `requested` | `head`, `receipt` (`attempted`, then `accepted`) | observe, before the review request and after its receipt |
 | `verdict` | `review`, `head`, `verdict`, `findings`, `corrections` | route |
 | `verified` | `review`, `head` | verified, after the internal review passed the correction |
 
@@ -65,11 +73,22 @@ one of `clean`, `adjudicated`, `correct`, `unavailable`, `exhausted`, `blocked`.
 
 Derived facts:
 
-- corrections used = distinct reviews with a `correct` verdict. Re-running the
-  same cycle after a restart does not count twice.
-- a head was requested = a `requested` event for it exists, so a restart never
-  repeats the request blindly.
-- a head is ready = the last verdict for it is `clean` or `adjudicated`.
+- corrections used = the first five distinct reviews, in log order, with a
+  `correct` verdict. Re-running the same cycle after a restart does not count
+  twice. A new `correct` verdict is a claim: route appends it, then reads the log
+  back, and a claim outside the first five records `exhausted` instead. Two runs
+  that both saw four cycles used read back the same order, so exactly one holds
+  the fifth; a crash between the two appends leaves a claim the count already
+  ignores.
+- a head was requested = a `requested` event for it exists. `attempted` is written
+  before the POST, so a crash or a lost response never sends a second request;
+  the wait then times out naming the unknown outcome.
+- the unverified correction = the review of the last correction cycle started,
+  unless a `verified` event for it follows. While one exists nothing passes: a
+  resumed run that restarts at a fresh Copilot review runs another cycle (whose
+  fixer also reads the canonical report's open blockers) instead of passing.
+- a head is ready = the last verdict for it is `clean` or `adjudicated` and there
+  is no unverified correction.
 
 No secret, token or credential is ever written; the ledger holds identifiers,
 counts and verdicts only.
@@ -121,6 +140,17 @@ head:
 The PR body resync also runs when the gate is on, since a Copilot correction
 changes the diff after the body was written.
 
+## Merge callers
+
+`externalReviewHold(url, head)` is the one readiness question every automated
+merge path asks: no hold when the policy is off, otherwise a hold unless the
+ledger calls that head ready. `archon-merge-queue` asks it for every planned head
+in its gate and again before each merge; `archon-loop`'s `land` asks it before
+`gh pr merge`. The loop's own in-loop builder never runs the gate, so with the
+policy on its pull requests are refused with a reason that routes them through
+`archon-deliver`. Human merges on GitHub are outside every workflow and are not
+gated.
+
 `adjudicated` means: the review on the current head has findings, the last
 correction cycle changed nothing because every finding was declined with
 evidence, and the internal continuation review verified those declines. A second
@@ -129,8 +159,15 @@ Copilot review of an unchanged head is not requested.
 ## Failure surfacing
 
 Every refusal writes `external-review/report.md` (pull request link, head, review,
-corrections used of five, the open findings and the reason) before the node
-fails. The failed node is the console's native error surface; `archon workflow
+corrections used of five, any unverified correction, the open findings and the
+reason) before the node fails. The report is also written before each stage that
+can fail without a script of its own: observe writes it before triage, and a
+`correct` route writes it before the fix, its green gate and the internal recheck,
+naming those stages, so a failed agent leaves a truthful in-progress report rather
+than a stale verdict. A report that cannot be written is added to the refusal, not
+put in its place. The gate never converts a pull request to draft: one this run
+opened stays draft until the flip, and an adopted pull request keeps the draft
+state it had. The failed node is the console's native error surface; `archon workflow
 resume` reruns it. No new notification channel is added. The console's existing
 run attention alerts (`packages/web/src/experiments/console/lib/attention-alerts.ts`)
 already treat a failed run as attention: when a user turns alerts on in that

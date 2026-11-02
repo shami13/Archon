@@ -431,7 +431,8 @@ nodes:
   # ends the loop; correct runs one cycle of fix, green gate, and an internal
   # continuation review that independently judges every external finding and
   # decline. The bound is an initial review plus five corrections; the route
-  # refuses an exhausted pull request before a sixth correction can start.
+  # refuses an exhausted pull request before a sixth correction can start, and
+  # the ledger's order settles two runs racing for the last one.
   - id: external-review
     depends_on: [external-review-policy]
     when: "$external-review-policy.output.mode == 'copilot'"
@@ -518,7 +519,11 @@ nodes:
               behavior. A finding unrelated to this change is a follow-up, not work
               for this round: say so. Record every disposition by finding id —
               fixed with its proof, declined with its evidence, or unrelated — in
-              implementation.md. The internal review that follows judges every
+              implementation.md. When findings.json names an
+              `unverified_correction`, an earlier correction of this pull request
+              never passed its internal review: the open blocking findings of the
+              canonical review report, $ARTIFACTS_DIR/review/report.md, are part
+              of this work as well. The internal review that follows judges every
               decline independently. Do not cross an explicit boundary to make a
               finding disappear.
 
@@ -935,7 +940,7 @@ nodes:
 
   # A CI correction moved the head after the external review judged it, so the
   # new head gets a Copilot review of its own: verification only, since there is
-  # no second correction loop after CI. Findings refuse with the PR still draft.
+  # no second correction loop after CI. Findings refuse before the ready flip.
   - id: ci-external-observe
     script: external-review-observe
     runtime: bun

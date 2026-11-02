@@ -5,7 +5,8 @@
  * agent found in its overview; the agent never removes an inline comment, so
  * dismissing one takes a correction cycle and the internal review's agreement.
  * `correct` starts a cycle; `clean` and `adjudicated` pass; every other verdict
- * refuses with the durable report written first.
+ * refuses with the durable report written first. The ledger, not this script's
+ * reading of it, settles a claim on the last correction cycle.
  *
  * Bound inputs (`with:` bindings, canonical text in env):
  * - INPUTS_PR: `$pr.output`.
@@ -17,11 +18,16 @@
 
 import {
   Ledger,
+  MAX_CORRECTIONS,
+  ROUTE_ACTIONS,
+  TRIAGE_OUTCOMES,
   decide,
   findingsOf,
   readFeedback,
+  reportStop,
   writeFindings,
   writeReport,
+  type RouteAction,
   type Verdict,
 } from '../../.shared/external-review.ts';
 import { parseQualifiedPr, record, type QualifiedPr } from '../../.shared/forge.ts';
@@ -31,15 +37,19 @@ const boundPr = process.env.INPUTS_PR;
 const review = trimmed(process.env.INPUTS_REVIEW);
 const head = trimmed(process.env.INPUTS_HEAD);
 const outcome = trimmed(process.env.INPUTS_OUTCOME);
-const reason = trimmed(process.env.INPUTS_REASON);
+const reason = trimmed(process.env.INPUTS_REASON).replace(/\.+$/, '');
 const overview = trimmed(process.env.INPUTS_OVERVIEW);
 const corrections = trimmed(process.env.INPUTS_CORRECTIONS);
 
-const REFUSALS: Partial<Record<Verdict, string>> = {
+const REFUSALS: Record<Exclude<Verdict, RouteAction>, string> = {
   unavailable: 'Copilot did not review the change',
-  exhausted: 'the review still has findings and this pull request has used every correction cycle',
-  blocked: 'the verification review of the final head has findings and no correction cycle remains for it',
+  exhausted: 'findings remain open and this pull request has used every correction cycle',
+  blocked: 'findings remain open on the verification review of the final head and no correction cycle remains for it',
 };
+
+function isRouteAction(verdict: Verdict): verdict is RouteAction {
+  return (ROUTE_ACTIONS as readonly string[]).includes(verdict);
+}
 
 function overviewFindings(): string[] {
   let parsed: unknown;
@@ -58,47 +68,54 @@ function overviewFindings(): string[] {
   });
 }
 
+function isOutcome(value: string): value is (typeof TRIAGE_OUTCOMES)[number] {
+  return (TRIAGE_OUTCOMES as readonly string[]).includes(value);
+}
+
 function route(ref: QualifiedPr, ledger: Ledger): void {
-  if (outcome !== 'reviewed' && outcome !== 'unavailable') {
-    throw new Error(`the triage outcome must be "reviewed" or "unavailable", not "${outcome}"`);
+  if (!isOutcome(outcome)) {
+    throw new Error(`the triage outcome must be one of ${TRIAGE_OUTCOMES.join(', ')}, not "${outcome}"`);
   }
   if (corrections !== 'allowed' && corrections !== 'none') {
     throw new Error(`corrections must be "allowed" or "none", not "${corrections}"`);
   }
   const feedback = readFeedback(artifactsDir(), review, head);
   const findings = findingsOf(feedback.comments, outcome === 'reviewed' ? overviewFindings() : []);
-  writeFindings(artifactsDir(), feedback, findings);
-  const decision = decide({
+  const unverified = ledger.unverifiedCorrection();
+  writeFindings(artifactsDir(), feedback, findings, unverified);
+  const decided = decide({
     review,
     outcome,
     findings,
     allowCorrection: corrections === 'allowed',
     ledger,
   });
-  ledger.append({
-    event: 'verdict',
+  const decision = ledger.recordVerdict({
     review,
     head,
-    verdict: decision.verdict,
+    verdict: decided.verdict,
     findings: findings.length,
-    corrections: decision.corrections,
+    corrections: decided.corrections,
   });
-  const refusal = REFUSALS[decision.verdict];
-  writeReport(artifactsDir(), ledger, {
-    ref,
-    status: decision.verdict,
-    reason: refusal ? `${refusal}: ${reason}` : reason,
-    head,
-    reviewUrl: feedback.review.url,
-    findings,
-  });
-  if (refusal) {
-    refuse(
-      `external-route: ${refusal} (${feedback.review.url}): ${reason}. See ${artifactsDir()}/external-review/report.md.`
-    );
-  } else {
-    emit({ action: decision.verdict, corrections: decision.corrections });
+  const open =
+    unverified === undefined
+      ? ''
+      : ` The correction for Copilot review ${unverified} has not passed the internal review, so its blocking findings are open too.`;
+  const state = { ref, status: decision.verdict, head, reviewUrl: feedback.review.url, findings };
+  const verdict = decision.verdict;
+  if (!isRouteAction(verdict)) {
+    const stop = `${REFUSALS[verdict]} (${feedback.review.url}): ${reason}.${open}`;
+    refuse(`external-route: ${reportStop(ledger, { ...state, reason: stop })}`);
+    return;
   }
+  writeReport(artifactsDir(), ledger, {
+    ...state,
+    reason:
+      verdict === 'correct'
+        ? `${reason}.${open} Correction cycle ${String(decision.corrections)} of ${String(MAX_CORRECTIONS)} runs next: the fix, its green gate, then the internal review of the correction. If the run stopped after this report, one of those stages failed and the findings below remain open.`
+        : reason,
+  });
+  emit({ action: verdict, corrections: decision.corrections });
 }
 
 try {
@@ -108,8 +125,7 @@ try {
     route(ref, ledger);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    writeReport(artifactsDir(), ledger, { ref, status: 'stopped while routing', reason, head });
-    throw error;
+    throw new Error(reportStop(ledger, { ref, status: 'stopped while routing', reason, head }));
   }
 } catch (error) {
   refuse(`external-route: ${error instanceof Error ? error.message : String(error)}`);

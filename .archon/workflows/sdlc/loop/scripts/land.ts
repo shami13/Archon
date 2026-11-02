@@ -10,10 +10,13 @@
  * this change's files).
  * A refusal is posted as `Loop review: not merged`, so the next lap continues with the
  * reasons in hand. The forge is GitHub, through `gh`, like the rest of this loop.
+ * A project with the external review gate on merges only a head that gate passed, which
+ * this loop's own builder never records: that work goes through archon-deliver.
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { externalReviewHold } from '../../.shared/external-review.ts';
 import { artifactsDir, emit, text, trimmed } from '../../.shared/io.ts';
 import {
   CLOCK_SLACK_MS,
@@ -147,6 +150,9 @@ if (view.code !== 0) {
     }
   }
 }
+
+const externalHold = alreadyMerged ? undefined : externalReviewHold(prUrl, landSha);
+if (externalHold !== undefined) refusals.push(externalHold);
 
 const comment = (body: string): void => {
   if (prUrl !== '') run(['gh', 'pr', 'comment', prUrl, '--body', body]);

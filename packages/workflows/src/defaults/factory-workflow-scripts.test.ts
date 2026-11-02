@@ -96,7 +96,10 @@ function stdout(result: ReturnType<typeof Bun.spawnSync>): string {
   return result.stdout?.toString() ?? '';
 }
 
-async function mergeFixture(method = 'squash'): Promise<{
+async function mergeFixture(
+  method = 'squash',
+  url = 'https://github.test/owner/repo/pull/17'
+): Promise<{
   artifacts: string;
   content: string;
   plan: Record<string, unknown>;
@@ -110,9 +113,7 @@ async function mergeFixture(method = 'squash'): Promise<{
     base: 'dev',
     base_sha: 'base',
     method,
-    pull_requests: [
-      { number: 17, url: 'https://github.test/owner/repo/pull/17', head_sha: 'head-17' },
-    ],
+    pull_requests: [{ number: 17, url, head_sha: 'head-17' }],
     evidence: [{ path: evidencePath, sha256: digest(evidenceContent) }],
   };
   const content = `${JSON.stringify(plan)}\n`;
@@ -1075,6 +1076,85 @@ describe('protected-path policy script', () => {
     expect((await paths('MISSION.md', ['a.cs'], {}, ['not a url'])).policy).toMatchObject({
       state: 'unknown',
     });
+  });
+});
+
+describe('merge queue under the external review gate', () => {
+  const url = 'https://github.com/owner/repo/pull/17';
+  const gateOn = (state: string): Record<string, string> => ({
+    ARCHON_SDLC_EXTERNAL_REVIEW: 'copilot',
+    ARCHON_SDLC_GITHUB_LOGIN: 'shami13',
+    STATE_DIR: state,
+  });
+  async function passCopilotReview(state: string): Promise<void> {
+    const dir = join(state, 'sdlc-external-review', 'github.com', 'owner', 'repo');
+    await mkdir(dir, { recursive: true });
+    const verdict = {
+      event: 'verdict',
+      review: '1',
+      head: 'head-17',
+      verdict: 'clean',
+      findings: 0,
+      corrections: 0,
+      at: 't',
+      run: 'r',
+    };
+    await writeFile(join(dir, 'pull-17.jsonl'), `${JSON.stringify(verdict)}\n`);
+  }
+  async function gateWith(state: string): Promise<Record<string, unknown>> {
+    const { artifacts, content } = await mergeFixture('squash', url);
+    const result = run(mergeScript, {
+      ...gateOn(state),
+      ARTIFACTS_DIR: artifacts,
+      INPUTS_ACTION: 'gate',
+      INPUTS_ASSESSMENT: JSON.stringify(assessment(content)),
+      INPUTS_CI_POLICY: JSON.stringify({ requirement: 'none', checks_state: 'not_applicable' }),
+      INPUTS_MERGE_METHOD: 'squash',
+    });
+    expect(result.exitCode).toBe(0);
+    return JSON.parse(stdout(result)) as Record<string, unknown>;
+  }
+
+  test('the gate holds a planned head no passing Copilot review covers', async () => {
+    const state = await mkdtemp(join(root, 'state-'));
+    expect(await gateWith(state)).toMatchObject({
+      ready: false,
+      summary: expect.stringContaining(`no passing Copilot review of ${url} at head-17`),
+    });
+    await passCopilotReview(state);
+    expect(await gateWith(state)).toMatchObject({ ready: true });
+  });
+
+  test('an authorized write still stops before gh when the head has no passing review', async () => {
+    const state = await mkdtemp(join(root, 'state-'));
+    const { artifacts, content } = await mergeFixture('squash', url);
+    const ghLog = join(artifacts, 'gh.jsonl');
+    const result = run(mergeScript, {
+      ...gateOn(state),
+      ARTIFACTS_DIR: artifacts,
+      INPUTS_ACTION: 'execute',
+      INPUTS_GATE: JSON.stringify({ ...assessment(content), ready: true }),
+      INPUTS_MODE: 'auto',
+      INPUTS_APPROVAL: '',
+      INPUTS_REQUEST: JSON.stringify({
+        authorized: true,
+        repository: 'owner/repo',
+        number: 17,
+        head_sha: 'head-17',
+        method: 'squash',
+        summary: 'fresh facts pass',
+      }),
+      INPUTS_PREVIOUS: '',
+      INPUTS_MERGE_METHOD: 'squash',
+      GH_LOG: ghLog,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdout(result))).toMatchObject({
+      merged: false,
+      summary: expect.stringContaining('deliver it through archon-deliver'),
+    });
+    await expect(readFile(ghLog, 'utf8')).rejects.toThrow();
   });
 });
 

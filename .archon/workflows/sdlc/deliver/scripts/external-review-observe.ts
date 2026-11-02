@@ -4,8 +4,9 @@
  * The head is the checkout the engine observed when this node started, and it must
  * already be the pull request's head: a review of any other commit is not a review
  * of what this run delivers. The wait is bounded in-process (a `wait:` node cannot
- * sit between this and the correction that follows it in one loop iteration), and
- * every refusal leaves the durable report behind before the node fails.
+ * sit between this and the correction that follows it in one loop iteration). A
+ * refusal leaves the durable report behind before the node fails, and so does an
+ * observation, since the triage agent that reads it next can fail too.
  *
  * Bound inputs (`with:` bindings, canonical text in env):
  * - INPUTS_PR: `$pr.output`, the run's verified pull-request record.
@@ -22,8 +23,8 @@ import {
   ghApi,
   observeCopilotReview,
   readPull,
-  writeFeedback,
-  writeReport,
+  reportStop,
+  writeObservation,
 } from '../../.shared/external-review.ts';
 import { parseQualifiedPr } from '../../.shared/forge.ts';
 import { artifactsDir, emit, refuse, runId, stateDir } from '../../.shared/io.ts';
@@ -54,18 +55,16 @@ try {
       waitMs: REVIEW_WAIT_MS,
       pollMs: POLL_INTERVAL_MS,
     });
-    const { head: reviewed, ...review } = observed.review;
-    writeFeedback(artifactsDir(), { pr: ref, head: reviewed, review, comments: observed.comments });
+    writeObservation(artifactsDir(), ledger, ref, observed);
     emit({
-      review: review.id,
-      head: reviewed,
-      url: review.url,
+      review: observed.review.id,
+      head: observed.review.head,
+      url: observed.review.url,
       comments: observed.comments.length,
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    writeReport(artifactsDir(), ledger, { ref, status: 'stopped while observing', reason, head });
-    throw error;
+    throw new Error(reportStop(ledger, { ref, status: 'stopped while observing', reason, head }));
   }
 } catch (error) {
   refuse(`external-observe: ${error instanceof Error ? error.message : String(error)}`);

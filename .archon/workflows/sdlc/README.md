@@ -198,5 +198,12 @@ hold it together:
   it once more. A CI correction after the review gets a verification-only review of
   its own.
 
-Its GitHub operations use `gh` whichever forge source the run selected, as issue
-writes do: the forge contract has no review-request operation.
+- **The budget is settled by the ledger's order.** A new correction is a claim
+  appended to the log; the first five distinct claims hold the cycles, so two runs
+  racing for the last one cannot both spend it. A correction the internal review
+  did not pass keeps the pull request unready until a later cycle passes.
+
+Merge paths ask the same ledger: `archon-merge-queue` and `archon-loop`'s `land`
+hold a head no passing Copilot review covers, which routes loop-built work through
+delivery. Its GitHub operations use `gh` whichever forge source the run selected,
+as issue writes do: the forge contract has no review-request operation.

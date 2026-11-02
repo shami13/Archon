@@ -16,11 +16,15 @@ import {
   MAX_CORRECTIONS,
   assertCopilotHost,
   assertIdentity,
+  ROUTE_ACTIONS,
+  TRIAGE_OUTCOMES,
   decide,
+  externalReviewHold,
   externalReviewPolicy,
   findingsOf,
   ghApi,
   observeCopilotReview,
+  writeObservation,
   type GitHub,
   type GitHubRequest,
   type Observation,
@@ -75,6 +79,8 @@ class FakeGitHub {
   comments = new Map<number, object[]>();
   login = 'shami13';
   requestListsCopilot = true;
+  /** The POST is applied, but its response never reaches the gate. */
+  loseReceipt = false;
   failOn: string | undefined;
   readonly calls: GitHubRequest[] = [];
 
@@ -90,8 +96,9 @@ class FakeGitHub {
       return { state: this.state, head: { sha: this.head }, requested_reviewers: this.requested };
     }
     if (path === `${base}/requested_reviewers` && request.method === 'POST') {
-      if (this.requestListsCopilot) this.requested = [COPILOT_REQUESTED];
-      return { requested_reviewers: this.requested };
+      this.requested = this.requestListsCopilot ? [COPILOT_REQUESTED] : [];
+      if (this.loseReceipt) throw new Error('gh api requested_reviewers: connection reset');
+      return { number: REF.number, head: { sha: this.head }, requested_reviewers: this.requested };
     }
     if (path === `${base}/reviews` && request.list) return [this.reviews];
     const comments = /\/reviews\/(\d+)\/comments$/.exec(path);
@@ -167,7 +174,7 @@ describe('observing the Copilot review of the current head', () => {
     expect(github.calls.find(call => call.method === 'POST')?.body).toEqual({
       reviewers: ['copilot-pull-request-reviewer[bot]'],
     });
-    expect(book.requested(HEAD)).toBe(true);
+    expect(book.request(HEAD)).toBe('accepted');
   });
 
   it('never takes a review while Copilot is still a requested reviewer', async () => {
@@ -193,7 +200,7 @@ describe('observing the Copilot review of the current head', () => {
     expect(github.posts()).toBe(1);
 
     const restarted = observe(github, ledger(dir, 'run-2'));
-    expect(await refusal(restarted)).toMatch(/Copilot is not a requested reviewer.*resume this run/);
+    expect(await refusal(restarted)).toMatch(/GitHub accepted the request and no longer lists Copilot as pending.*resume this run/);
     expect(github.posts()).toBe(1);
   });
 
@@ -238,10 +245,49 @@ describe('observing the Copilot review of the current head', () => {
     expect(observed.review.id).toBe('22');
   });
 
-  it('refuses when GitHub accepts the request but does not list Copilot', async () => {
+  // Observed live: GitHub answered an accepted Copilot request with an empty
+  // requested_reviewers list, and Copilot's review arrived minutes later.
+  it('takes an accepted request whose receipt lists no reviewer, and waits for the review', async () => {
     const github = new FakeGitHub();
     github.requestListsCopilot = false;
-    expect(await refusal(observe(github, ledger()))).toMatch(/does not list Copilot as a requested reviewer/);
+    const book = ledger();
+    const observed = await observe(github, book, elapsed => {
+      if (elapsed === 4 * MINUTE) github.submit(14, 30);
+    });
+    expect(observed.review.id).toBe('14');
+    expect(github.posts()).toBe(1);
+    expect(book.request(HEAD)).toBe('accepted');
+  });
+
+  it('never requests twice after a lost receipt, and names the unknown outcome', async () => {
+    const github = new FakeGitHub();
+    github.requestListsCopilot = false;
+    github.loseReceipt = true;
+    const dir = scratch();
+    expect(await refusal(observe(github, ledger(dir)))).toMatch(
+      /failed or its receipt was lost, so whether GitHub applied it is unknown.*connection reset/
+    );
+    expect(ledger(dir).request(HEAD)).toBe('attempted');
+
+    github.loseReceipt = false;
+    const resumed = observe(github, ledger(dir, 'run-2'));
+    expect(await refusal(resumed)).toMatch(/attempted but its receipt was never read, so whether GitHub applied it is unknown/);
+    expect(github.posts()).toBe(1);
+  });
+
+  it('refuses a receipt for another head', async () => {
+    const github = new FakeGitHub();
+    const api: GitHub = request =>
+      request.method === 'POST' ? { number: REF.number, head: { sha: OLD_HEAD }, requested_reviewers: [] } : github.api(request);
+    const observed = observeCopilotReview(REF, HEAD, {
+      github: api,
+      ledger: ledger(),
+      now: () => 0,
+      sleep: () => Promise.resolve(),
+      waitMs: 30 * MINUTE,
+      pollMs: 30_000,
+    });
+    expect(await refusal(observed)).toMatch(new RegExp(`receipt for the review request names pull 7 at ${OLD_HEAD}`));
   });
 
   it('does not reuse a review it judged unavailable, and takes the next one', async () => {
@@ -420,6 +466,7 @@ describe('routing a review', () => {
       });
       expect(verdict).toEqual({ verdict: 'correct', corrections: cycle });
       first.append({ event: 'verdict', review: String(cycle), head: `h${String(cycle)}`, verdict: 'correct', findings: 2, corrections: cycle });
+      first.append({ event: 'verified', review: String(cycle), head: `h${String(cycle)}` });
     }
     // A restarted or later run on the same pull request reads the same count.
     const restarted = ledger(dir, 'run-2');
@@ -430,6 +477,89 @@ describe('routing a review', () => {
     expect(
       decide({ review: '6', outcome: 'reviewed', findings: [], allowCorrection: true, ledger: restarted }).verdict
     ).toBe('clean');
+  });
+
+  const claim = (book: Ledger, review: string): { verdict: string; corrections: number } => {
+    const decided = decide({ review, outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: book });
+    return book.recordVerdict({ review, head: `h-${review}`, verdict: decided.verdict, findings: 2, corrections: decided.corrections });
+  };
+
+  function fourUsed(): string {
+    const dir = scratch();
+    const book = ledger(dir, 'run-0');
+    for (let cycle = 1; cycle <= MAX_CORRECTIONS - 1; cycle++) {
+      book.append({ event: 'verdict', review: `r${String(cycle)}`, head: `h${String(cycle)}`, verdict: 'correct', findings: 1, corrections: cycle });
+      book.append({ event: 'verified', review: `r${String(cycle)}`, head: `h${String(cycle)}` });
+    }
+    return dir;
+  }
+
+  // Two runs on one pull request each read four cycles used before either writes.
+  it('lets exactly one of two racing runs spend the last correction', () => {
+    const dir = fourUsed();
+    const a = ledger(dir, 'run-a');
+    const b = ledger(dir, 'run-b');
+    const input = (review: string, book: Ledger) =>
+      ({ review, outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: book }) as const;
+    expect(decide(input('rA', a))).toEqual({ verdict: 'correct', corrections: 5 });
+    expect(decide(input('rB', b))).toEqual({ verdict: 'correct', corrections: 5 });
+    expect(a.recordVerdict({ review: 'rA', head: 'hA', verdict: 'correct', findings: 2, corrections: 5 })).toEqual({
+      verdict: 'correct',
+      corrections: 5,
+    });
+    expect(b.recordVerdict({ review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 })).toEqual({
+      verdict: 'exhausted',
+      corrections: 5,
+    });
+    expect(ledger(dir, 'run-c').correctionsUsed()).toBe(5);
+    expect(claim(ledger(dir, 'run-b'), 'rB').verdict).toBe('exhausted');
+  });
+
+  it('settles the race by log order when both claims land before either reads back', () => {
+    const dir = fourUsed();
+    const a = ledger(dir, 'run-a');
+    const b = ledger(dir, 'run-b');
+    expect(decide({ review: 'rA', outcome: 'reviewed', findings: inline, allowCorrection: true, ledger: a }).verdict).toBe(
+      'correct'
+    );
+    // B's claim reaches the log after A decided and before A writes its own.
+    b.append({ event: 'verdict', review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 });
+    expect(a.recordVerdict({ review: 'rA', head: 'hA', verdict: 'correct', findings: 2, corrections: 5 })).toEqual({
+      verdict: 'exhausted',
+      corrections: 5,
+    });
+    expect(b.recordVerdict({ review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 }).verdict).toBe(
+      'correct'
+    );
+    expect(b.correctionsUsed()).toBe(5);
+  });
+
+  it('gives a losing claim cut short by a crash no cycle on resume', () => {
+    const dir = fourUsed();
+    const book = ledger(dir);
+    expect(claim(book, 'rA').verdict).toBe('correct');
+    book.append({ event: 'verdict', review: 'rB', head: 'hB', verdict: 'correct', findings: 2, corrections: 5 });
+    expect(book.correctionsUsed()).toBe(5);
+    expect(book.holdsCorrection('rB')).toBe(false);
+    expect(claim(ledger(dir, 'run-2'), 'rB').verdict).toBe('exhausted');
+  });
+
+  it('passes nothing while a correction waits for its internal review', () => {
+    const book = ledger();
+    expect(claim(book, 'r1').verdict).toBe('correct');
+    // The recheck refused, the run resumed at a fresh review of the corrected head.
+    expect(book.unverifiedCorrection()).toBe('r1');
+    const fresh = { review: 'r2', outcome: 'reviewed' as const, findings: [], allowCorrection: true, ledger: book };
+    expect(decide(fresh)).toEqual({ verdict: 'correct', corrections: 2 });
+    expect(decide({ ...fresh, allowCorrection: false }).verdict).toBe('blocked');
+    book.append({ event: 'verdict', review: 'r2', head: 'h-r2', verdict: 'clean', findings: 0, corrections: 1 });
+    expect(book.ready('h-r2')).toBe(false);
+
+    expect(claim(book, 'r2').verdict).toBe('correct');
+    book.append({ event: 'verified', review: 'r2', head: 'h-r2' });
+    expect(book.unverifiedCorrection()).toBeUndefined();
+    book.append({ event: 'verdict', review: 'r3', head: 'h-r3', verdict: 'clean', findings: 0, corrections: 2 });
+    expect(book.ready('h-r3')).toBe(true);
   });
 
   it('blocks findings on a verification-only review', () => {
@@ -453,7 +583,7 @@ describe('the ledger', () => {
   it('refuses an unreadable line rather than guessing past it', () => {
     const book = ledger();
     mkdirSync(dirname(book.path), { recursive: true });
-    writeFileSync(book.path, '{"event":"requested","head":"x","at":"t","run":"r"}\nnot json\n');
+    writeFileSync(book.path, '{"event":"requested","head":"x","receipt":"accepted","at":"t","run":"r"}\nnot json\n');
     expect(() => book.correctionsUsed()).toThrow(/unreadable line 2/);
   });
 });
@@ -516,6 +646,31 @@ describe('the node scripts', () => {
     expect(JSON.parse(readFileSync(join(run.artifacts, 'external-review/findings.json'), 'utf8')).findings).toHaveLength(1);
   });
 
+  it('reports a started correction cycle before the stages that can fail after it', () => {
+    const state = scratch();
+    const run = route(state, {}, [{ id: '78', path: 'src/c.ts', line: 2, url: `${PR_URL}#c78`, body: 'Unchecked input.' }]);
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout)).toEqual({ action: 'correct', corrections: 1 });
+    const report = readFileSync(join(run.artifacts, 'external-review/report.md'), 'utf8');
+    expect(report).toContain('Status: correct');
+    expect(report).toContain('Correction cycle 1 of 5 runs next');
+    expect(report).toContain('If the run stopped after this report, one of those stages failed');
+    expect(report).toContain('Unverified correction: review 9');
+  });
+
+  it('runs another cycle on a clean review while an earlier correction is unverified', () => {
+    const state = scratch();
+    ledger(state).append({ event: 'verdict', review: '8', head: OLD_HEAD, verdict: 'correct', findings: 1, corrections: 1 });
+    const run = route(state, {});
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout)).toEqual({ action: 'correct', corrections: 2 });
+    const findings = JSON.parse(readFileSync(join(run.artifacts, 'external-review/findings.json'), 'utf8'));
+    expect(findings.unverified_correction).toBe('8');
+    expect(readFileSync(join(run.artifacts, 'external-review/report.md'), 'utf8')).toContain(
+      'The correction for Copilot review 8 has not passed the internal review'
+    );
+  });
+
   it('refuses feedback that describes another review or head', () => {
     const run = route(scratch(), { INPUTS_HEAD: OLD_HEAD });
     expect(run.code).not.toBe(0);
@@ -538,11 +693,123 @@ describe('the node scripts', () => {
     const refused = verified('correct');
     expect(refused.code).not.toBe(0);
     expect(refused.stderr).toContain('returned "correct"');
+    expect(refused.stderr).toContain('does not flip the pull request ready');
+    expect(refused.stderr).not.toContain('draft');
     expect(ledger(state).verified('9')).toBe(false);
-    expect(existsSync(join(refused.artifacts, 'external-review/report.md'))).toBe(true);
+    expect(readFileSync(join(refused.artifacts, 'external-review/report.md'), 'utf8')).toContain(
+      'Status: correction not verified'
+    );
 
     expect(verified('none').code).toBe(0);
     expect(ledger(state).verified('9')).toBe(true);
+  });
+});
+
+describe('the observation report', () => {
+  it('says triage comes next, so a failed triage leaves a truthful report', () => {
+    const artifacts = scratch();
+    const book = ledger();
+    writeObservation(artifacts, book, REF, {
+      review: { id: '15', head: HEAD, url: `${PR_URL}#review-15`, state: 'COMMENTED', submittedAt: 't', body: 'x' },
+      comments: [],
+    });
+    const report = readFileSync(join(artifacts, 'external-review/report.md'), 'utf8');
+    expect(report).toContain('Status: observed');
+    expect(report).toContain(`Head: ${HEAD}`);
+    expect(report).toContain('if the run stopped after this report, that triage failed');
+    expect(JSON.parse(readFileSync(join(artifacts, 'external-review/feedback.json'), 'utf8')).review.id).toBe('15');
+  });
+
+  it('keeps the refusal reason when the report cannot be written', () => {
+    const blocked = join(scratch(), 'artifacts');
+    writeFileSync(blocked, 'a file where the artifact directory should be');
+    const run = runPackScript('deliver/scripts/external-review-verified', {
+      inputs: {
+        INPUTS_PR: JSON.stringify(REF),
+        INPUTS_REVIEW: '9',
+        INPUTS_HEAD: HEAD,
+        INPUTS_REVIEW_ACTION: 'replan',
+        STATE_DIR: scratch(),
+        WORKFLOW_ID: 'run-1',
+        ARTIFACTS_DIR: blocked,
+      },
+    });
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain('returned "replan"');
+    expect(run.stderr).toContain('the external review report could not be written');
+  });
+});
+
+describe('the merge paths under the external review gate', () => {
+  const URL = `https://github.com/${REF.repo.path}/pull/7`;
+
+  function withPolicy<T>(state: string, body: () => T, mode = 'copilot'): T {
+    const keys = ['ARCHON_SDLC_EXTERNAL_REVIEW', 'ARCHON_SDLC_GITHUB_LOGIN', 'STATE_DIR'] as const;
+    const saved = keys.map(key => process.env[key]);
+    Object.assign(process.env, { ARCHON_SDLC_EXTERNAL_REVIEW: mode, ARCHON_SDLC_GITHUB_LOGIN: 'shami13', STATE_DIR: state });
+    try {
+      return body();
+    } finally {
+      keys.forEach((key, index) => {
+        const value = saved[index];
+        if (value === undefined) Reflect.deleteProperty(process.env, key);
+        else process.env[key] = value;
+      });
+    }
+  }
+
+  it('holds nothing when the gate is off', () => {
+    expect(withPolicy(scratch(), () => externalReviewHold(URL, HEAD), 'none')).toBeUndefined();
+  });
+
+  it('holds a head no passing review covers, and releases a ready one', () => {
+    const state = scratch();
+    expect(withPolicy(state, () => externalReviewHold(URL, HEAD))).toMatch(/no passing Copilot review .* deliver it through archon-deliver/);
+    ledger(state).append({ event: 'verdict', review: '1', head: HEAD, verdict: 'clean', findings: 0, corrections: 0 });
+    expect(withPolicy(state, () => externalReviewHold(URL, HEAD))).toBeUndefined();
+    expect(withPolicy(state, () => externalReviewHold(URL, OLD_HEAD))).toMatch(/no passing Copilot review/);
+  });
+
+  it('refuses the loop merge gate on a head no passing review covers', () => {
+    const state = scratch();
+    const run = runPackScript('loop/scripts/land', {
+      gh: { pr: { headRefOid: HEAD } },
+      inputs: {
+        INPUTS_PR: URL,
+        INPUTS_SHA: HEAD,
+        INPUTS_ROUTE: 'simple',
+        INPUTS_REPORT: JSON.stringify({ pr: URL, head: HEAD, overall: 'PASS', lines: [] }),
+        ARCHON_SDLC_EXTERNAL_REVIEW: 'copilot',
+        ARCHON_SDLC_GITHUB_LOGIN: 'shami13',
+        STATE_DIR: state,
+      },
+    });
+    expect(run.code).toBe(0);
+    const result = JSON.parse(run.stdout) as { outcome: string; reason: string };
+    expect(result.outcome).toBe('refused');
+    expect(result.reason).toContain(`no passing Copilot review of ${URL} at ${HEAD}; deliver it through archon-deliver`);
+    expect(run.gh.some(call => call.startsWith('pr merge'))).toBe(false);
+  });
+
+  it('holds what it cannot confirm', () => {
+    expect(withPolicy(scratch(), () => externalReviewHold('https://ghe.example.com/o/r/pull/1', HEAD))).toMatch(
+      /could not confirm .*github.com only/
+    );
+    expect(withPolicy(scratch(), () => externalReviewHold('not a url', HEAD))).toMatch(/is not a pull request URL/);
+  });
+});
+
+describe('the YAML vocabulary the scripts share', () => {
+  const deliver = Bun.YAML.parse(
+    readFileSync(join(import.meta.dir, '../../workflows/sdlc/deliver/archon-deliver.yaml'), 'utf8')
+  ) as { nodes: { id: string; loop_group?: { nodes: { id: string; output_format?: { properties: Record<string, { enum?: string[] }> } }[] } }[] };
+  const body = deliver.nodes.find(node => node.id === 'external-review')?.loop_group?.nodes ?? [];
+  const property = (id: string, name: string): string[] | undefined =>
+    body.find(node => node.id === id)?.output_format?.properties[name]?.enum;
+
+  it('declares the route actions and triage outcomes the scripts accept', () => {
+    expect(property('external-route', 'action')).toEqual([...ROUTE_ACTIONS]);
+    expect(property('external-triage', 'outcome')).toEqual([...TRIAGE_OUTCOMES]);
   });
 });
 

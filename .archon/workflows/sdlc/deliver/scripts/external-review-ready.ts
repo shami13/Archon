@@ -10,9 +10,9 @@
  * - INPUTS_PR: `$pr.output`.
  */
 
-import { Ledger, assertCopilotHost, ghApi, readPull, writeReport } from '../../.shared/external-review.ts';
+import { Ledger, assertCopilotHost, ghApi, readPull, reportStop } from '../../.shared/external-review.ts';
 import { parseQualifiedPr } from '../../.shared/forge.ts';
-import { artifactsDir, emit, refuse, runId, stateDir } from '../../.shared/io.ts';
+import { emit, refuse, runId, stateDir } from '../../.shared/io.ts';
 
 const boundPr = process.env.INPUTS_PR;
 
@@ -24,13 +24,17 @@ try {
     assertCopilotHost(ref);
     head = readPull(ghApi, ref).head;
     if (!ledger.ready(head)) {
-      throw new Error(`no clean or adjudicated Copilot review covers the pull request head ${head}`);
+      const open = ledger.unverifiedCorrection();
+      throw new Error(
+        open === undefined
+          ? `no clean or adjudicated Copilot review covers the pull request head ${head}`
+          : `the correction for Copilot review ${open} has not passed the internal review, so its blocking findings remain open`
+      );
     }
     emit({ head });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    writeReport(artifactsDir(), ledger, { ref, status: 'not ready', reason, head });
-    throw error;
+    throw new Error(reportStop(ledger, { ref, status: 'not ready', reason, head }));
   }
 } catch (error) {
   refuse(`external-review-ready: ${error instanceof Error ? error.message : String(error)}`);

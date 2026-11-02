@@ -16,6 +16,8 @@
  * The ledger is the engine's per-project cross-run state (`$STATE_DIR`), not this
  * run's artifacts: a `loop_group` that fails and is resumed restarts at iteration 1,
  * so an iteration bound alone would hand a restarted run five fresh corrections.
+ * Every automated merge path asks the same ledger through `externalReviewHold`, so
+ * a pull request no Copilot review passed is not merged around the gate.
  */
 
 import {
@@ -31,6 +33,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runGh } from './claims.ts';
 import { record, type QualifiedPr } from './forge.ts';
+import { artifactsDir, runId, stateDir } from './io.ts';
 
 export const MAX_CORRECTIONS = 5;
 export const REVIEW_WAIT_MS = 30 * 60_000;
@@ -82,6 +85,13 @@ function isCopilot(user: unknown): boolean {
 
 export function pullUrl(ref: QualifiedPr): string {
   return `https://${ref.repo.host}/${ref.repo.path}/pull/${String(ref.number)}`;
+}
+
+/** The pull request a `https://<host>/<owner>/<repo>/pull/<n>` URL names. */
+export function pullRefOf(url: string): QualifiedPr {
+  const match = /^https:\/\/([^/]+)\/([^/]+\/[^/]+)\/pull\/(\d+)\/?$/.exec(url.trim());
+  if (!match?.[1] || !match[2] || !match[3]) throw new Error(`${url} is not a pull request URL`);
+  return { repo: { host: match[1], path: match[2] }, number: Number(match[3]) };
 }
 
 // ── GitHub ────────────────────────────────────────────────────────────────
@@ -243,18 +253,23 @@ function reviewComments(github: GitHub, ref: QualifiedPr, review: string): Revie
   });
 }
 
-function requestCopilot(github: GitHub, ref: QualifiedPr): void {
-  const response = record(
+/**
+ * Ask for a Copilot review of `head`. The receipt must name this pull request and
+ * head; its `requested_reviewers` is not evidence either way, since GitHub answers
+ * an accepted Copilot request with an empty list and the review arrives later.
+ */
+function requestCopilot(github: GitHub, ref: QualifiedPr, head: string): void {
+  const receipt = record(
     github({
       method: 'POST',
       path: `repos/${ref.repo.path}/pulls/${String(ref.number)}/requested_reviewers`,
       body: { reviewers: [COPILOT.requestAs] },
     })
   );
-  const requested = response?.requested_reviewers;
-  if (!Array.isArray(requested) || !(requested as unknown[]).some(isCopilot)) {
+  const receiptHead = record(receipt?.head)?.sha;
+  if (receipt?.number !== ref.number || receiptHead !== head) {
     throw new Error(
-      `GitHub accepted the review request on ${pullUrl(ref)} but does not list Copilot as a requested reviewer; Copilot code review may be unavailable to this account on this repository`
+      `GitHub's receipt for the review request names pull ${String(receipt?.number)} at ${String(receiptHead)}, not ${pullUrl(ref)} at ${head}`
     );
   }
 }
@@ -271,12 +286,26 @@ export const VERDICTS = [
 ] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
+/** The verdicts that let delivery continue: the route node's `action`. */
+export const ROUTE_ACTIONS = ['clean', 'adjudicated', 'correct'] as const;
+export type RouteAction = (typeof ROUTE_ACTIONS)[number];
+
+/** The triage agent's reading of a review: Copilot reviewed the change, or did not. */
+export const TRIAGE_OUTCOMES = ['reviewed', 'unavailable'] as const;
+
+/**
+ * A request is `attempted` before the POST and `accepted` once GitHub's receipt is
+ * read, so a crash or a lost response between the two never sends a second request.
+ */
+export const RECEIPTS = ['attempted', 'accepted'] as const;
+export type Receipt = (typeof RECEIPTS)[number];
+
 interface Stamp {
   readonly at: string;
   readonly run: string;
 }
 export type LedgerEvent =
-  | (Stamp & { readonly event: 'requested'; readonly head: string })
+  | (Stamp & { readonly event: 'requested'; readonly head: string; readonly receipt: Receipt })
   | (Stamp & {
       readonly event: 'verdict';
       readonly review: string;
@@ -302,7 +331,7 @@ function parseEvent(line: string, index: number, path: string): LedgerEvent {
     text(value.at) &&
     typeof value.run === 'string' &&
     text(value.head) &&
-    (value.event === 'requested' ||
+    ((value.event === 'requested' && (RECEIPTS as readonly unknown[]).includes(value.receipt)) ||
       (value.event === 'verified' && text(value.review)) ||
       (value.event === 'verdict' &&
         text(value.review) &&
@@ -315,8 +344,10 @@ function parseEvent(line: string, index: number, path: string): LedgerEvent {
 
 /**
  * One pull request's append-only event log. Appends of one short line stay whole
- * under concurrent writers, so two runs on the same pull request lose no event;
- * every fact is folded from the whole log on read.
+ * under concurrent writers, so two runs on the same pull request lose no event and
+ * read back one order; every fact is folded from the whole log on read. A decision
+ * that spends budget is settled by that order (`recordVerdict`), never by a count
+ * read before the write.
  */
 export class Ledger {
   constructor(
@@ -353,8 +384,12 @@ export class Ledger {
     appendFileSync(this.path, `${JSON.stringify(stamped)}\n`);
   }
 
-  requested(head: string): boolean {
-    return this.events().some(event => event.event === 'requested' && event.head === head);
+  /** How far the request for `head` got: no request, attempted, or accepted by GitHub. */
+  request(head: string): Receipt | undefined {
+    const receipts = this.events().flatMap(event =>
+      event.event === 'requested' && event.head === head ? [event.receipt] : []
+    );
+    return receipts.includes('accepted') ? 'accepted' : receipts.at(0);
   }
 
   verified(review: string): boolean {
@@ -371,21 +406,96 @@ export class Ledger {
     return this.verdicts().some(event => event.review === review && event.verdict === verdict);
   }
 
-  /** Distinct reviews that started a correction: a rerun of one cycle counts once. */
-  correctionsUsed(): number {
-    return new Set(
-      this.verdicts()
-        .filter(event => event.verdict === 'correct')
-        .map(event => event.review)
-    ).size;
+  /**
+   * The reviews that hold a correction cycle: the first five distinct reviews, in log
+   * order, with a `correct` verdict. A rerun of one cycle counts once, and a claim
+   * that lost the race for the last cycle holds none.
+   */
+  private admitted(): Set<string> {
+    const admitted = new Set<string>();
+    for (const event of this.verdicts()) {
+      if (event.verdict === 'correct' && admitted.size < MAX_CORRECTIONS) admitted.add(event.review);
+    }
+    return admitted;
   }
 
-  /** The head carries a passing verdict and nothing after it said otherwise. */
+  holdsCorrection(review: string): boolean {
+    return this.admitted().has(review);
+  }
+
+  correctionsUsed(): number {
+    return this.admitted().size;
+  }
+
+  /**
+   * The review whose correction cycle no internal review has passed yet: the last
+   * cycle started, unless a `verified` event for it follows. A failed recheck leaves
+   * it open, so the internal review's blockers outlive a resume that starts over at
+   * a fresh Copilot review.
+   */
+  unverifiedCorrection(): string | undefined {
+    const admitted = this.admitted();
+    let open: string | undefined;
+    for (const event of this.events()) {
+      if (event.event === 'verdict' && event.verdict === 'correct' && admitted.has(event.review)) {
+        open = event.review;
+      } else if (event.event === 'verified' && event.review === open) {
+        open = undefined;
+      }
+    }
+    return open;
+  }
+
+  /**
+   * Record a route verdict. A `correct` verdict is a claim on a correction cycle and
+   * the log's order settles it: two runs that both read four cycles used both append,
+   * both read back the same order, and exactly one holds the fifth. The other records
+   * `exhausted`. A crash between those two appends leaves a claim the fold already
+   * discounts.
+   */
+  recordVerdict(event: Omit<Extract<LedgerEvent, { event: 'verdict' }>, keyof Stamp | 'event'>): {
+    verdict: Verdict;
+    corrections: number;
+  } {
+    this.append({ event: 'verdict', ...event });
+    if (event.verdict !== 'correct' || this.holdsCorrection(event.review)) {
+      return { verdict: event.verdict, corrections: this.correctionsUsed() };
+    }
+    const corrections = this.correctionsUsed();
+    this.append({ event: 'verdict', ...event, verdict: 'exhausted', corrections });
+    return { verdict: 'exhausted', corrections };
+  }
+
+  /**
+   * The head carries a passing verdict, nothing after it said otherwise, and no
+   * correction cycle is waiting for its internal review.
+   */
   ready(head: string): boolean {
     const last = this.verdicts()
       .filter(event => event.head === head)
       .at(-1);
-    return last?.verdict === 'clean' || last?.verdict === 'adjudicated';
+    return (
+      (last?.verdict === 'clean' || last?.verdict === 'adjudicated') &&
+      this.unverifiedCorrection() === undefined
+    );
+  }
+}
+
+/**
+ * Why an automated merge of `url` at `head` must wait for the external review gate,
+ * or undefined when it may go ahead. Off by policy means no hold. Anything the gate
+ * cannot confirm holds: only the delivery workflow's gate records a passing review,
+ * so a pull request built any other way is routed back through it.
+ */
+export function externalReviewHold(url: string, head: string): string | undefined {
+  try {
+    if (externalReviewPolicy().mode === 'none') return undefined;
+    const ref = pullRefOf(url);
+    assertCopilotHost(ref);
+    if (Ledger.forPull(stateDir(), ref, runId()).ready(head)) return undefined;
+    return `the external review gate has no passing Copilot review of ${url} at ${head}; deliver it through archon-deliver, whose gate records one`;
+  } catch (error) {
+    return `the external review gate could not confirm ${url}: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 
@@ -441,18 +551,36 @@ export async function observeCopilotReview(
           `Copilot's latest review of ${head} (${latest.url}) did not review the change, and no new review is pending; request a Copilot review on the pull request, then resume this run`
         );
       }
-      if (!ledger.requested(head)) {
-        requestCopilot(github, ref);
-        ledger.append({ event: 'requested', head });
+      if (ledger.request(head) === undefined) {
+        ledger.append({ event: 'requested', head, receipt: 'attempted' });
+        try {
+          requestCopilot(github, ref, head);
+        } catch (error) {
+          throw new Error(
+            `the review request on ${pullUrl(ref)} failed or its receipt was lost, so whether GitHub applied it is unknown (${error instanceof Error ? error.message : String(error)}); the attempt is recorded, so a resumed run waits for a review instead of requesting again`
+          );
+        }
+        ledger.append({ event: 'requested', head, receipt: 'accepted' });
       }
     }
     if (options.now() >= deadline) {
       throw new Error(
-        `no Copilot review of ${head} arrived within ${String(Math.round(options.waitMs / 60_000))} minutes (${pull.pending ? 'the request is still pending' : 'Copilot is not a requested reviewer'}); once a review of this head is submitted, or after requesting one on the pull request, resume this run`
+        `no Copilot review of ${head} arrived within ${String(Math.round(options.waitMs / 60_000))} minutes (${requestState(pull.pending, ledger.request(head))}); once a review of this head is submitted, or after requesting one on the pull request, resume this run`
       );
     }
     await options.sleep(options.pollMs);
   }
+}
+
+function requestState(pending: boolean, receipt: Receipt | undefined): string {
+  if (pending) return 'the request is still pending';
+  if (receipt === 'accepted') {
+    return 'GitHub accepted the request and no longer lists Copilot as pending; its review may still arrive, or Copilot may not run';
+  }
+  if (receipt === 'attempted') {
+    return 'a request was attempted but its receipt was never read, so whether GitHub applied it is unknown';
+  }
+  return 'Copilot is not a requested reviewer';
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────
@@ -490,27 +618,31 @@ export function findingsOf(
 
 export interface RouteInput {
   readonly review: string;
-  readonly outcome: 'reviewed' | 'unavailable';
+  readonly outcome: (typeof TRIAGE_OUTCOMES)[number];
   readonly findings: readonly Finding[];
   readonly allowCorrection: boolean;
   readonly ledger: Ledger;
 }
 
 /**
- * What the review on the current head lets delivery do.
+ * What the review on the current head lets delivery do, before `recordVerdict`
+ * settles a new claim on a correction cycle.
  *
  * `adjudicated` is the one passing verdict with findings: the correction cycle for
  * this exact review already ran, changed nothing because every finding was declined
  * with evidence, and the internal review verified those declines. A correction that
- * changed code moved the head, so its review is never this one.
+ * changed code moved the head, so its review is never this one. Nothing passes while
+ * an earlier correction waits for its internal review: that cycle's blockers are
+ * still open, however clean the newer review is.
  */
 export function decide(input: RouteInput): { verdict: Verdict; corrections: number } {
   const used = input.ledger.correctionsUsed();
   if (input.outcome === 'unavailable') return { verdict: 'unavailable', corrections: used };
-  if (input.findings.length === 0) return { verdict: 'clean', corrections: used };
-  if (input.ledger.verified(input.review)) return { verdict: 'adjudicated', corrections: used };
+  const settled = input.ledger.unverifiedCorrection() === undefined;
+  if (settled && input.findings.length === 0) return { verdict: 'clean', corrections: used };
+  if (settled && input.ledger.verified(input.review)) return { verdict: 'adjudicated', corrections: used };
   if (!input.allowCorrection) return { verdict: 'blocked', corrections: used };
-  if (input.ledger.hasVerdict(input.review, 'correct')) return { verdict: 'correct', corrections: used };
+  if (input.ledger.holdsCorrection(input.review)) return { verdict: 'correct', corrections: used };
   if (used >= MAX_CORRECTIONS) return { verdict: 'exhausted', corrections: used };
   return { verdict: 'correct', corrections: used + 1 };
 }
@@ -528,10 +660,29 @@ export function externalReviewDir(artifacts: string): string {
   return join(artifacts, 'external-review');
 }
 
-export function writeFeedback(artifacts: string, feedback: Feedback): void {
+/**
+ * Record an observed review for the nodes after it: the feedback the triage agent
+ * reads, and a report saying triage comes next, since that agent can fail without a
+ * script to report it.
+ */
+export function writeObservation(
+  artifacts: string,
+  ledger: Ledger,
+  ref: QualifiedPr,
+  observed: Observation
+): void {
+  const { head, ...review } = observed.review;
   const dir = externalReviewDir(artifacts);
   mkdirSync(dir, { recursive: true });
+  const feedback: Feedback = { pr: ref, head, review, comments: observed.comments };
   writeFileSync(join(dir, 'feedback.json'), `${JSON.stringify(feedback, null, 2)}\n`);
+  writeReport(artifacts, ledger, {
+    ref,
+    status: 'observed',
+    reason: `Copilot review ${review.id} of ${head} was observed and the triage agent reads it next; if the run stopped after this report, that triage failed and no verdict was recorded`,
+    head,
+    reviewUrl: review.url,
+  });
 }
 
 export function readFeedback(artifacts: string, review: string, head: string): Feedback {
@@ -548,10 +699,15 @@ export function readFeedback(artifacts: string, review: string, head: string): F
   return feedback;
 }
 
+/**
+ * `unverified_correction` names an earlier Copilot review whose correction no
+ * internal review passed: that review's open blockers are this cycle's work too.
+ */
 export function writeFindings(
   artifacts: string,
   feedback: Feedback,
-  findings: readonly Finding[]
+  findings: readonly Finding[],
+  unverifiedCorrection: string | undefined
 ): void {
   writeFileSync(
     join(externalReviewDir(artifacts), 'findings.json'),
@@ -561,6 +717,7 @@ export function writeFindings(
         head: feedback.head,
         review: feedback.review.id,
         url: feedback.review.url,
+        unverified_correction: unverifiedCorrection ?? null,
         findings,
       },
       null,
@@ -578,30 +735,37 @@ export interface ReportState {
   readonly findings?: readonly Finding[];
 }
 
+function historyLine(event: LedgerEvent): string {
+  switch (event.event) {
+    case 'verdict':
+      return `- ${event.at} review ${event.review} of ${event.head}: ${event.verdict} (${String(event.findings)} findings, ${String(event.corrections)}/${String(MAX_CORRECTIONS)} corrections)`;
+    case 'requested':
+      return `- ${event.at} review request for ${event.head}: ${event.receipt}`;
+    case 'verified':
+      return `- ${event.at} correction for review ${event.review} verified by the internal review at ${event.head}`;
+  }
+}
+
 /**
- * The durable report the operator opens when the gate stops: written before every
- * refusal and on every verdict, so the newest file always says where things stand.
+ * The durable report the operator opens when the gate stops. It is written on every
+ * verdict, before every stage that can fail, and before every refusal, so the newest
+ * file always says where things stand.
  */
 export function writeReport(artifacts: string, ledger: Ledger, state: ReportState): void {
   const dir = externalReviewDir(artifacts);
   mkdirSync(dir, { recursive: true });
   let history: string[];
+  let corrections: string;
+  let unverified: string;
   try {
-    history = ledger
-      .events()
-      .map(event =>
-        event.event === 'verdict'
-          ? `- ${event.at} review ${event.review} of ${event.head}: ${event.verdict} (${String(event.findings)} findings, ${String(event.corrections)}/${String(MAX_CORRECTIONS)} corrections)`
-          : `- ${event.at} ${event.event} ${event.head}`
-      );
+    history = ledger.events().map(historyLine);
+    corrections = `${String(ledger.correctionsUsed())} of ${String(MAX_CORRECTIONS)}`;
+    const open = ledger.unverifiedCorrection();
+    unverified = open === undefined ? 'none' : `review ${open} (no internal review has passed it)`;
   } catch (error) {
     history = [`- the ledger could not be read: ${error instanceof Error ? error.message : String(error)}`];
-  }
-  let corrections: string;
-  try {
-    corrections = `${String(ledger.correctionsUsed())} of ${String(MAX_CORRECTIONS)}`;
-  } catch {
     corrections = 'unknown (the ledger could not be read)';
+    unverified = 'unknown (the ledger could not be read)';
   }
   const findings = state.findings ?? [];
   const lines = [
@@ -613,6 +777,7 @@ export function writeReport(artifacts: string, ledger: Ledger, state: ReportStat
     `- Head: ${state.head ?? 'unknown'}`,
     `- Review: ${state.reviewUrl ?? 'none observed'}`,
     `- Corrections used: ${corrections}`,
+    `- Unverified correction: ${unverified}`,
     `- Ledger: ${ledger.path}`,
     '',
     `## Findings on this review (${String(findings.length)})`,
@@ -630,4 +795,17 @@ export function writeReport(artifacts: string, ledger: Ledger, state: ReportStat
     '',
   ];
   writeFileSync(join(dir, 'report.md'), lines.join('\n'));
+}
+
+/**
+ * Write the stop report and return the reason to refuse with. A report that cannot
+ * be written is added to the reason rather than replacing it.
+ */
+export function reportStop(ledger: Ledger, state: ReportState): string {
+  try {
+    writeReport(artifactsDir(), ledger, state);
+    return `${state.reason.replace(/\.+$/, '')}; see ${join(externalReviewDir(artifactsDir()), 'report.md')}`;
+  } catch (error) {
+    return `${state.reason} (the external review report could not be written: ${error instanceof Error ? error.message : String(error)})`;
+  }
 }

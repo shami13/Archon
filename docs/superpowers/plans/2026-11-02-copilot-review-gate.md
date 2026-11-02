@@ -131,9 +131,12 @@ Copilot review of an unchanged head is not requested.
 Every refusal writes `external-review/report.md` (pull request link, head, review,
 corrections used of five, the open findings and the reason) before the node
 fails. The failed node is the console's native error surface; `archon workflow
-resume` reruns it. No new notification channel is added. Whether the console
-raises a browser or system notification for a failed run depends on its own
-notification support and the user's permission; this change does not add one.
+resume` reruns it. No new notification channel is added. The console's existing
+run attention alerts (`packages/web/src/experiments/console/lib/attention-alerts.ts`)
+already treat a failed run as attention: when a user turns alerts on in that
+browser and grants notification permission, an open console plays a sound and
+shows a system notification. Without that opt-in, or with the console closed,
+nothing is pushed; the failed run and its report wait in the console.
 
 ## Tests
 

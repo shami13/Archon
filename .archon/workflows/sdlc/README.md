@@ -175,3 +175,28 @@ the same project gate on two pinned parts and their composed tree. Its `interact
 result remains red; delivery holds it rather than treating it as inherited or
 environmental. The report retains revision, tree and check evidence for an existing
 merger to consume. It does not install a queue or authorize a merge.
+
+## External review
+
+Delivery can require a Copilot review of the exact pushed head after the internal
+review converges (`ARCHON_SDLC_EXTERNAL_REVIEW=copilot`, with
+`ARCHON_SDLC_GITHUB_LOGIN`; off by default). [`.shared/external-review.ts`](.shared/external-review.ts)
+owns the policy, the Copilot identity, and the per-pull-request ledger under
+`$STATE_DIR` that bounds corrections to five across restarts and runs. Three rules
+hold it together:
+
+- **Review state is not a verdict.** Copilot submits `COMMENTED` whether it found
+  nothing, found problems, or could not review at all. Inline comments are findings
+  by construction; the overview is prose, so an agent reads it into typed fields and
+  code routes on those.
+- **Every external finding is judged twice.** The correction pass fixes or declines
+  each one with evidence, and the internal continuation review settles each as a
+  finding with `sources: [external-review]`, so a decline is never accepted on the
+  fixer's word.
+- **The verdict is bound to a head.** The gate refuses when the head moves while it
+  waits, the ready check re-reads the head against the ledger, and the flip compares
+  it once more. A CI correction after the review gets a verification-only review of
+  its own.
+
+Its GitHub operations use `gh` whichever forge source the run selected, as issue
+writes do: the forge contract has no review-request operation.

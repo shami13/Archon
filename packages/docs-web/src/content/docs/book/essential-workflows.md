@@ -145,6 +145,16 @@ archon workflow run archon-deliver --branch feat/export-csv "Deliver the plan in
 
 **What it produces**: A PR marked ready for review, with one canonical review comment.
 
+**Optional Copilot review gate**: a project can require a GitHub Copilot review of the exact pushed head before delivery continues. Set it in the project's `.archon/config.yaml`, which CLI and Web runs both read:
+
+```yaml
+env:
+  ARCHON_SDLC_EXTERNAL_REVIEW: copilot
+  ARCHON_SDLC_GITHUB_LOGIN: your-github-login
+```
+
+After the internal review converges, the run requests a Copilot review of the pushed head and waits up to 30 minutes for it. A review of an earlier commit, a pending request, or a review Copilot could not perform never counts as clean. Copilot's findings go through a correction pass and a fresh internal review, at most five times per pull request; that count is kept in the project's state directory, so a restarted or later run on the same pull request continues it. The gate checks that the GitHub token belongs to `ARCHON_SDLC_GITHUB_LOGIN` before it acts, supports github.com only, and never retries a failed GitHub call. When it stops, the run fails with the PR still draft, and `external-review/report.md` in the run's artifacts names the pull request, the head, the remaining findings, the correction count and the reason. The gate is off unless a project sets it.
+
 ---
 
 ### Review and validation

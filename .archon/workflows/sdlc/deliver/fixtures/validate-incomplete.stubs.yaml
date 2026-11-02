@@ -48,6 +48,7 @@ review__publish:
 validate__discover: { checks: [{ name: "lint", argv: ["bun", "-e", "console.log('lint passed')"] }, { name: "tests", argv: ["archon-fixture-command-that-does-not-exist"] }], notes: "stub: the project's checks" }
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: failed
   fail-node: gate-validated

@@ -66,6 +66,7 @@ claim:
   holder: fixture-run
   reason: "stub: this run holds the work item"
 release: "released 1 claim(s)"
+external-review: { ran: "true", reason: "stub: Codex found nothing that blocks this head", review: "codex-fixturehead", head: "fixturehead", blocking: 0, findings: "/fixture/external-review/findings.json" }
 fixture:
   expect: completed
   reached:
@@ -73,6 +74,7 @@ fixture:
   - claim
   - build
   - subject
+  - external-review
   - check-app
   - evidence
   - review

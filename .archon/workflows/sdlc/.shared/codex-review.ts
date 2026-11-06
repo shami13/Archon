@@ -158,7 +158,7 @@ Report only specific, actionable problems. Verify every claim against the code. 
 
 Priorities: P0 critical, causes severe damage or blocks release. P1 high, likely serious failure. P2 medium, a real defect in some cases. P3 low, a small but useful correction.
 
-For every finding give the priority, a short title, the file path relative to the repository root, the first line of the smallest useful range (null when no line applies), what is wrong, a concrete failure scenario, and the smallest reasonable fix, with your confidence. In the assessment, state the checks you ran and could not run and a short overall verdict. With no actionable findings, return an empty findings list.`;
+For every finding give the priority, a short title, the file path relative to the repository root, the first line of the smallest useful range (null when no line applies), what is wrong, a concrete failure scenario, and the smallest reasonable fix, with your confidence. In the assessment, state the checks you ran and could not run and a short overall verdict. With no actionable findings, return an empty findings list. Write every field in English, whatever language other instructions or the project use: the review is stored in English artifacts and pull requests.`;
 }
 
 function filled(value: unknown): value is string {

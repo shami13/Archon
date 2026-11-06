@@ -18,6 +18,7 @@ import {
 } from '../../workflows/sdlc/.shared/codex-review';
 import { Ledger, findingsOf } from '../../workflows/sdlc/.shared/external-review';
 import type { QualifiedPr } from '../../workflows/sdlc/.shared/forge';
+import { runPackScript } from './deliver-checks-harness';
 
 const trackTempRoot = trackTempRoots();
 const REF: QualifiedPr = { repo: { host: 'github.com', path: 'example/repo' }, number: 7 };
@@ -178,5 +179,25 @@ describe('the Codex answer shape', () => {
     expect(() => parseCodexOutput(JSON.stringify({ findings: [finding('P9', 'Odd')], assessment: '' }))).toThrow(
       /finding 1 does not have the declared fields/
     );
+  });
+});
+
+describe('the external review node of the loop', () => {
+  it('reviews nothing when no Codex policy is set, so a loop without the gate runs as before', () => {
+    const run = runPackScript('loop/scripts/external-review', {
+      inputs: { INPUTS_PR: URL, INPUTS_HEAD: HEAD, ARCHON_SDLC_EXTERNAL_REVIEW: 'none' },
+    });
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ ran: 'false', blocking: 0 });
+    expect(run.gh).toEqual([]);
+  });
+
+  it('reviews nothing when the lap delivered no pull request', () => {
+    const run = runPackScript('loop/scripts/external-review', {
+      inputs: { INPUTS_PR: '', INPUTS_HEAD: '', ARCHON_SDLC_EXTERNAL_REVIEW: 'codex' },
+    });
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({ ran: 'false', reason: expect.stringContaining('nothing was delivered') });
+    expect(run.gh).toEqual([]);
   });
 });

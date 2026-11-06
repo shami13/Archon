@@ -10,7 +10,15 @@
  * - INPUTS_PR: `$pr.output`.
  */
 
-import { Ledger, assertCopilotHost, ghApi, readPull, reportStop } from '../../.shared/external-review.ts';
+import {
+  Ledger,
+  assertCopilotHost,
+  externalReviewPolicy,
+  ghApi,
+  readPull,
+  reportStop,
+  reviewerName,
+} from '../../.shared/external-review.ts';
 import { parseQualifiedPr } from '../../.shared/forge.ts';
 import { emit, refuse, runId, stateDir } from '../../.shared/io.ts';
 
@@ -21,14 +29,14 @@ try {
   const ledger = Ledger.forPull(stateDir(), ref, runId());
   let head: string | undefined;
   try {
-    assertCopilotHost(ref);
+    if (externalReviewPolicy().mode === 'copilot') assertCopilotHost(ref);
     head = readPull(ghApi, ref).head;
     if (!ledger.ready(head)) {
       const open = ledger.unverifiedCorrection();
       throw new Error(
         open === undefined
-          ? `no clean or adjudicated Copilot review covers the pull request head ${head}`
-          : `the correction for Copilot review ${open} has not passed the internal review, so its blocking findings remain open`
+          ? `no clean or adjudicated ${reviewerName()} review covers the pull request head ${head}`
+          : `the correction for ${reviewerName()} review ${open} has not passed the internal review, so its blocking findings remain open`
       );
     }
     emit({ head });

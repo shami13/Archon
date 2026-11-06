@@ -145,7 +145,7 @@ if (view.code !== 0) {
           const unreviewed = commit === '' ? undefined : externalReviewHold(prUrl, commit);
           const pushed = commit === '' || unreviewed !== undefined ? null : run(['git', 'push', '--quiet', 'origin', `${commit}:refs/heads/${pr.headRefName}`]);
           if (unreviewed !== undefined) {
-            refusals.push(`${pr.baseRefName} has moved past the reviewed head, and with the external review gate on the merge gate does not push a merge of it that no Copilot review covers; bring the branch up to date through archon-deliver, whose gate reviews the new head`);
+            refusals.push(`${pr.baseRefName} has moved past the reviewed head, and with the external review gate on the merge gate does not push a merge of it that no external review covers; bring the branch up to date through archon-deliver, whose gate reviews the new head`);
           } else if (pushed?.code !== 0) {
             refusals.push(`${pr.baseRefName} has moved past what was tested and the gate could not push the clean merge: ${(pushed?.err ?? made.err).trim().slice(0, 200)}`);
           } else {

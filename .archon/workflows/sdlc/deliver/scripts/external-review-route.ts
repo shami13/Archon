@@ -25,6 +25,8 @@ import {
   findingsOf,
   readFeedback,
   reportStop,
+  reviewerName,
+  reviewerOf,
   writeFindings,
   writeReport,
   type RouteAction,
@@ -42,10 +44,10 @@ const overview = trimmed(process.env.INPUTS_OVERVIEW);
 const corrections = trimmed(process.env.INPUTS_CORRECTIONS);
 
 const REFUSALS: Record<Exclude<Verdict, RouteAction>, (holder: string | undefined) => string> = {
-  unavailable: () => 'Copilot did not review the change',
+  unavailable: () => `${reviewerName()} did not review the change`,
   exhausted: () => 'findings remain open and this pull request has used every correction cycle',
   claimed: holder =>
-    `run ${String(holder)} already holds the correction cycle for this review, so this run does not correct it too; resume that run, or, if it no longer runs, request a new Copilot review of this head and resume this one`,
+    `run ${String(holder)} already holds the correction cycle for this review, so this run does not correct it too; resume that run, or, if it no longer runs, request a new ${reviewerName()} review of this head and resume this one`,
   blocked: () =>
     'findings remain open on the verification review of the final head and no correction cycle remains for it',
 };
@@ -83,7 +85,7 @@ function route(ref: QualifiedPr, ledger: Ledger): void {
     throw new Error(`corrections must be "allowed" or "none", not "${corrections}"`);
   }
   const feedback = readFeedback(artifactsDir(), review, head);
-  const findings = findingsOf(feedback.comments, outcome === 'reviewed' ? overviewFindings() : []);
+  const findings = findingsOf(feedback.comments, outcome === 'reviewed' ? overviewFindings() : [], reviewerOf());
   const unverified = ledger.unverifiedCorrection();
   writeFindings(artifactsDir(), feedback, findings, unverified);
   const decision = ledger.recordVerdict({
@@ -95,7 +97,7 @@ function route(ref: QualifiedPr, ledger: Ledger): void {
   const open =
     unverified === undefined
       ? ''
-      : ` The correction for Copilot review ${unverified} has not passed the internal review, so its blocking findings are open too.`;
+      : ` The correction for ${reviewerName()} review ${unverified} has not passed the internal review, so its blocking findings are open too.`;
   const state = { ref, status: decision.verdict, head, reviewUrl: feedback.review.url, findings };
   const verdict = decision.verdict;
   if (!isRouteAction(verdict)) {

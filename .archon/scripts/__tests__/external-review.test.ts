@@ -112,7 +112,7 @@ class FakeGitHub {
     const path = request.path.split('?')[0];
     if (path === 'user') return { login: this.login };
     if (path === base) {
-      return { state: this.state, head: { sha: this.head }, requested_reviewers: this.requested };
+      return { state: this.state, head: { sha: this.head }, base: { ref: 'main' }, requested_reviewers: this.requested };
     }
     if (path === `${base}/requested_reviewers` && request.method === 'POST') {
       this.onPost?.();
@@ -481,9 +481,15 @@ describe('the policy that turns the gate on', () => {
     ).toThrow(/needs ARCHON_SDLC_GITHUB_LOGIN/);
   });
 
+  it('runs Codex without a GitHub login, since it only reads the pull request', () => {
+    expect(
+      withEnv({ ARCHON_SDLC_EXTERNAL_REVIEW: 'codex', ARCHON_SDLC_GITHUB_LOGIN: undefined }, externalReviewPolicy)
+    ).toEqual({ mode: 'codex' });
+  });
+
   it('refuses a value it does not know rather than turning the gate off', () => {
     expect(() => withEnv({ ARCHON_SDLC_EXTERNAL_REVIEW: 'Copilot' }, externalReviewPolicy)).toThrow(
-      /must be one of "none", "copilot" \(the first is the default\), not "Copilot"/
+      /must be one of "none", "copilot", "codex" \(the first is the default\), not "Copilot"/
     );
   });
 });

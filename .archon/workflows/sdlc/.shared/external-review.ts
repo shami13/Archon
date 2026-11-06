@@ -1,11 +1,14 @@
 /**
- * Delivery's external review gate: a Copilot review of the exact pull-request head,
- * at most five correction cycles per pull request, and the ledger that keeps that
- * count across restarts and runs.
+ * Delivery's external review gate: a Copilot or Codex review of the exact
+ * pull-request head, at most five correction cycles per pull request, and the
+ * ledger that keeps that count across restarts and runs.
  *
- * The gate is opt-in per project. `ARCHON_SDLC_EXTERNAL_REVIEW=copilot` turns it on,
- * and `ARCHON_SDLC_GITHUB_LOGIN` names the one GitHub login it may act as. Both are
- * read here, not in the calling scripts, for the same reason `forgeSource()` is.
+ * The gate is opt-in per project. `ARCHON_SDLC_EXTERNAL_REVIEW=copilot` turns it on
+ * with Copilot, and `ARCHON_SDLC_GITHUB_LOGIN` names the one GitHub login it may act
+ * as. `ARCHON_SDLC_EXTERNAL_REVIEW=codex` turns it on with a local, read-only Codex
+ * review of the run's checkout ([`codex-review.ts`](./codex-review.ts)); it acts on
+ * GitHub only to read the pull request. Both are read here, not in the calling
+ * scripts, for the same reason `forgeSource()` is.
  *
  * Every GitHub operation goes through `gh` whichever forge source the run selected:
  * the forge contract has no review-request operation, the same reason issue writes
@@ -40,7 +43,7 @@ export const REVIEW_WAIT_MS = 30 * 60_000;
 export const POLL_INTERVAL_MS = 30_000;
 
 /** The policy node's `mode`, first the default. */
-export const EXTERNAL_REVIEW_MODES = ['none', 'copilot'] as const;
+export const EXTERNAL_REVIEW_MODES = ['none', 'copilot', 'codex'] as const;
 export type ExternalReviewMode = (typeof EXTERNAL_REVIEW_MODES)[number];
 
 export type ExternalReviewPolicy =
@@ -58,7 +61,7 @@ export function externalReviewPolicy(): ExternalReviewPolicy {
       `ARCHON_SDLC_EXTERNAL_REVIEW must be one of ${EXTERNAL_REVIEW_MODES.map(mode => `"${mode}"`).join(', ')} (the first is the default), not "${selected}"`
     );
   }
-  if (selected === 'none') return { mode: selected };
+  if (selected !== 'copilot') return { mode: selected };
   const login = (process.env.ARCHON_SDLC_GITHUB_LOGIN ?? '').trim();
   if (login === '') {
     throw new Error(
@@ -156,6 +159,8 @@ export function assertCopilotHost(ref: QualifiedPr): void {
 interface Pull {
   readonly state: string;
   readonly head: string;
+  /** The branch the pull request merges into. */
+  readonly base: string;
   /** Copilot is a requested reviewer that has not yet submitted. */
   readonly pending: boolean;
 }
@@ -163,10 +168,13 @@ interface Pull {
 export function readPull(github: GitHub, ref: QualifiedPr): Pull {
   const pull = record(github({ path: `repos/${ref.repo.path}/pulls/${String(ref.number)}` }));
   const head = record(pull?.head);
+  const base = record(pull?.base);
   if (
     typeof pull?.state !== 'string' ||
     typeof head?.sha !== 'string' ||
     head.sha === '' ||
+    typeof base?.ref !== 'string' ||
+    base.ref === '' ||
     !Array.isArray(pull.requested_reviewers)
   ) {
     throw new Error(`GitHub returned an unexpected pull request for ${pullUrl(ref)}`);
@@ -174,6 +182,7 @@ export function readPull(github: GitHub, ref: QualifiedPr): Pull {
   return {
     state: pull.merged === true ? 'merged' : pull.state,
     head: head.sha,
+    base: base.ref,
     pending: (pull.requested_reviewers as unknown[]).some(isCopilot),
   };
 }
@@ -516,11 +525,12 @@ export class Ledger {
  */
 export function externalReviewHold(url: string, head: string): string | undefined {
   try {
-    if (externalReviewPolicy().mode === 'none') return undefined;
+    const { mode } = externalReviewPolicy();
+    if (mode === 'none') return undefined;
     const ref = pullRefOf(url);
-    assertCopilotHost(ref);
+    if (mode === 'copilot') assertCopilotHost(ref);
     if (Ledger.forPull(stateDir(), ref, runId()).ready(head)) return undefined;
-    return `the external review gate has no passing Copilot review of ${url} at ${head}; deliver it through archon-deliver, whose gate records one`;
+    return `the external review gate has no passing ${reviewerName()} review of ${url} at ${head}; deliver it through archon-deliver, whose gate records one`;
   } catch (error) {
     return `the external review gate could not confirm ${url}: ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -624,11 +634,12 @@ export interface Finding {
 /** Every inline comment is a finding; the overview adds the concerns no comment carries. */
 export function findingsOf(
   comments: readonly ReviewComment[],
-  overview: readonly string[]
+  overview: readonly string[],
+  reviewer = 'copilot'
 ): Finding[] {
   return [
     ...comments.map(comment => ({
-      id: `copilot-c${comment.id}`,
+      id: `${reviewer}-c${comment.id}`,
       source: 'inline' as const,
       text: comment.body,
       path: comment.path,
@@ -636,7 +647,7 @@ export function findingsOf(
       url: comment.url,
     })),
     ...overview.map((text, index) => ({
-      id: `copilot-o${String(index + 1)}`,
+      id: `${reviewer}-o${String(index + 1)}`,
       source: 'overview' as const,
       text,
     })),
@@ -672,6 +683,15 @@ export function decide(input: RouteInput): Verdict {
 
 // ── Artifacts ─────────────────────────────────────────────────────────────
 
+/** The reviewer the policy selects, for ids and prose; Copilot while the gate is off. */
+export function reviewerOf(): 'copilot' | 'codex' {
+  return (process.env.ARCHON_SDLC_EXTERNAL_REVIEW ?? '').trim() === 'codex' ? 'codex' : 'copilot';
+}
+
+export function reviewerName(): string {
+  return reviewerOf() === 'codex' ? 'Codex' : 'Copilot';
+}
+
 export interface Feedback {
   readonly pr: QualifiedPr;
   readonly head: string;
@@ -702,7 +722,10 @@ export function writeObservation(
   writeReport(artifacts, ledger, {
     ref,
     status: 'observed',
-    reason: `Copilot review ${review.id} of ${head} was observed and the triage agent reads it next; if the run stopped after this report, that triage failed and no verdict was recorded`,
+    reason:
+      reviewerOf() === 'codex'
+        ? `Codex review ${review.id} of ${head} was observed and the route reads it next`
+        : `Copilot review ${review.id} of ${head} was observed and the triage agent reads it next; if the run stopped after this report, that triage failed and no verdict was recorded`,
     head,
     reviewUrl: review.url,
   });
@@ -736,7 +759,7 @@ export function writeFindings(
     join(externalReviewDir(artifacts), 'findings.json'),
     `${JSON.stringify(
       {
-        reviewer: 'copilot',
+        reviewer: reviewerOf(),
         head: feedback.head,
         review: feedback.review.id,
         url: feedback.review.url,
@@ -792,7 +815,7 @@ export function writeReport(artifacts: string, ledger: Ledger, state: ReportStat
   }
   const findings = state.findings ?? [];
   const lines = [
-    '# External review (Copilot)',
+    `# External review (${reviewerName()})`,
     '',
     `- Pull request: ${pullUrl(state.ref)}`,
     `- Status: ${state.status}`,

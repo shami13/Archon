@@ -11,7 +11,7 @@
  * - INPUTS_REVIEW_ACTION: the internal recheck's action.
  */
 
-import { Ledger, reportStop } from '../../.shared/external-review.ts';
+import { Ledger, reportStop, reviewerName } from '../../.shared/external-review.ts';
 import { parseQualifiedPr } from '../../.shared/forge.ts';
 import { emit, refuse, runId, stateDir, trimmed } from '../../.shared/io.ts';
 
@@ -26,7 +26,7 @@ try {
   try {
     if (action !== 'none') {
       throw new Error(
-        `the internal review of the correction for Copilot review ${review} returned "${action}", so blocking findings remain open; the canonical review report lists them, and this run does not flip the pull request ready`
+        `the internal review of the correction for ${reviewerName()} review ${review} returned "${action}", so blocking findings remain open; the canonical review report lists them, and this run does not flip the pull request ready`
       );
     }
     ledger.append({ event: 'verified', review, head });

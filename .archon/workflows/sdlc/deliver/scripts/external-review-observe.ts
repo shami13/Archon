@@ -1,5 +1,6 @@
 /**
- * Request and wait for a Copilot review of the head this run pushed.
+ * Request and wait for a Copilot review of the head this run pushed, or, with the
+ * Codex policy, review it with Codex in this checkout (`.shared/codex-review.ts`).
  *
  * The head is the checkout the engine observed when this node started, and it must
  * already be the pull request's head: a review of any other commit is not a review
@@ -13,6 +14,7 @@
  */
 
 import { nodeStartCommit } from '../../.shared/checkout.ts';
+import { codexCli, fetchBase, observeCodexReview } from '../../.shared/codex-review.ts';
 import {
   Ledger,
   POLL_INTERVAL_MS,
@@ -22,9 +24,11 @@ import {
   externalReviewPolicy,
   ghApi,
   observeCopilotReview,
+  pullUrl,
   readPull,
   reportStop,
   writeObservation,
+  type Observation,
 } from '../../.shared/external-review.ts';
 import { parseQualifiedPr } from '../../.shared/forge.ts';
 import { artifactsDir, emit, refuse, runId, stateDir } from '../../.shared/io.ts';
@@ -37,24 +41,37 @@ try {
   let head: string | undefined;
   try {
     const policy = externalReviewPolicy();
-    if (policy.mode !== 'copilot') throw new Error('the external review gate is off for this run');
-    assertCopilotHost(ref);
-    assertIdentity(ghApi, policy.login);
+    if (policy.mode === 'none') throw new Error('the external review gate is off for this run');
+    if (policy.mode === 'copilot') {
+      assertCopilotHost(ref);
+      assertIdentity(ghApi, policy.login);
+    }
     head = nodeStartCommit();
-    const remote = readPull(ghApi, ref).head;
-    if (remote !== head) {
+    const pull = readPull(ghApi, ref);
+    if (pull.head !== head) {
       throw new Error(
-        `the checkout is at ${head} but the pull request head is ${remote}; push this run's commits before requesting a review`
+        `the checkout is at ${head} but the pull request head is ${pull.head}; push this run's commits before requesting a review`
       );
     }
-    const observed = await observeCopilotReview(ref, head, {
-      github: ghApi,
-      ledger,
-      now: Date.now,
-      sleep: ms => Bun.sleep(ms),
-      waitMs: REVIEW_WAIT_MS,
-      pollMs: POLL_INTERVAL_MS,
-    });
+    const observed: Observation =
+      policy.mode === 'codex'
+        ? observeCodexReview(head, {
+            ledger,
+            cwd: process.cwd(),
+            url: pullUrl(ref),
+            base: pull.base,
+            runner: codexCli,
+            fetchBase,
+            now: Date.now,
+          })
+        : await observeCopilotReview(ref, head, {
+            github: ghApi,
+            ledger,
+            now: Date.now,
+            sleep: ms => Bun.sleep(ms),
+            waitMs: REVIEW_WAIT_MS,
+            pollMs: POLL_INTERVAL_MS,
+          });
     writeObservation(artifactsDir(), ledger, ref, observed);
     emit({
       review: observed.review.id,

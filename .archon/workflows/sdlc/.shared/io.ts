@@ -59,6 +59,23 @@ export function artifactsDir(): string {
 }
 
 /**
+ * This project's cross-run state directory, which the engine supplies to every exec
+ * node beside `ARTIFACTS_DIR`. Absent means the same engine bug, so it throws too.
+ */
+export function stateDir(): string {
+  const value = process.env.STATE_DIR;
+  if (value === undefined || value === '') {
+    throw new Error('STATE_DIR is not set; the engine supplies it to every exec node.');
+  }
+  return value;
+}
+
+/** The run this node belongs to, for records other runs will read. */
+export function runId(): string {
+  return process.env.WORKFLOW_ID ?? '';
+}
+
+/**
  * The node's result: one strict JSON document on stdout.
  *
  * A node that declares `output_format` gets exactly one attempt — no fence

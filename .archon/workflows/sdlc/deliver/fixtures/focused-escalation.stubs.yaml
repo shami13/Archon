@@ -30,6 +30,7 @@ review__publish:
   findings_summary: "stub: clean on initial review"
   report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
 gate-ready: '{"ready":"true"}'
+external-review-policy: { mode: none }
 ci-probe: '{"state":"concluded","detail":"no checks configured on this repository — nothing to await"}'
 ci-verdict: '{"state":"concluded","detail":"no checks configured on this repository — nothing to await"}'
 ci-attention-route: '{"attention":false,"red_cause":""}'

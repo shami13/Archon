@@ -96,7 +96,10 @@ function stdout(result: ReturnType<typeof Bun.spawnSync>): string {
   return result.stdout?.toString() ?? '';
 }
 
-async function mergeFixture(method = 'squash'): Promise<{
+async function mergeFixture(
+  method = 'squash',
+  url = 'https://github.test/owner/repo/pull/17'
+): Promise<{
   artifacts: string;
   content: string;
   plan: Record<string, unknown>;
@@ -110,9 +113,7 @@ async function mergeFixture(method = 'squash'): Promise<{
     base: 'dev',
     base_sha: 'base',
     method,
-    pull_requests: [
-      { number: 17, url: 'https://github.test/owner/repo/pull/17', head_sha: 'head-17' },
-    ],
+    pull_requests: [{ number: 17, url, head_sha: 'head-17' }],
     evidence: [{ path: evidencePath, sha256: digest(evidenceContent) }],
   };
   const content = `${JSON.stringify(plan)}\n`;
@@ -1075,6 +1076,125 @@ describe('protected-path policy script', () => {
     expect((await paths('MISSION.md', ['a.cs'], {}, ['not a url'])).policy).toMatchObject({
       state: 'unknown',
     });
+  });
+});
+
+describe('merge queue under the external review gate', () => {
+  const url = 'https://github.com/owner/repo/pull/17';
+  const gateOn = (state: string): Record<string, string> => ({
+    ARCHON_SDLC_EXTERNAL_REVIEW: 'copilot',
+    ARCHON_SDLC_GITHUB_LOGIN: 'shami13',
+    STATE_DIR: state,
+  });
+  /** A state directory whose ledger passed pull request `number` at `head`, or holds nothing. */
+  async function stateWith(pass?: { number: number; head: string }): Promise<string> {
+    const state = await mkdtemp(join(root, 'state-'));
+    if (pass === undefined) return state;
+    const dir = join(state, 'sdlc-external-review', 'github.com', 'owner', 'repo');
+    await mkdir(dir, { recursive: true });
+    const verdict = {
+      event: 'verdict',
+      review: '1',
+      head: pass.head,
+      verdict: 'clean',
+      findings: 0,
+      at: 't',
+      run: 'r',
+    };
+    await writeFile(join(dir, `pull-${String(pass.number)}.jsonl`), `${JSON.stringify(verdict)}\n`);
+    return state;
+  }
+  // The planned head is head-17 of pull 17; a pass of anything else covers nothing.
+  const holds = {
+    'no ledger': undefined,
+    'a pass of an earlier head': { number: 17, head: 'head-16' },
+    'a pass of another pull request': { number: 18, head: 'head-17' },
+  } as const;
+  const reviewed = { number: 17, head: 'head-17' };
+
+  async function gateWith(state: string): Promise<Record<string, unknown>> {
+    const { artifacts, content } = await mergeFixture('squash', url);
+    const result = run(mergeScript, {
+      ...gateOn(state),
+      ARTIFACTS_DIR: artifacts,
+      INPUTS_ACTION: 'gate',
+      INPUTS_ASSESSMENT: JSON.stringify(assessment(content)),
+      INPUTS_CI_POLICY: JSON.stringify({ requirement: 'none', checks_state: 'not_applicable' }),
+      INPUTS_MERGE_METHOD: 'squash',
+    });
+    expect(result.exitCode).toBe(0);
+    return JSON.parse(stdout(result)) as Record<string, unknown>;
+  }
+
+  async function executeWith(
+    state: string
+  ): Promise<{ result: Record<string, unknown>; gh: string[][] }> {
+    const { artifacts, content } = await mergeFixture('squash', url);
+    const ghLog = join(artifacts, 'gh.jsonl');
+    const result = run(mergeScript, {
+      ...gateOn(state),
+      ARTIFACTS_DIR: artifacts,
+      INPUTS_ACTION: 'execute',
+      INPUTS_GATE: JSON.stringify({ ...assessment(content), ready: true }),
+      INPUTS_MODE: 'auto',
+      INPUTS_APPROVAL: '',
+      INPUTS_REQUEST: JSON.stringify({
+        authorized: true,
+        repository: 'owner/repo',
+        number: 17,
+        head_sha: 'head-17',
+        method: 'squash',
+        summary: 'fresh facts pass',
+      }),
+      INPUTS_PREVIOUS: '',
+      INPUTS_MERGE_METHOD: 'squash',
+      GH_LOG: ghLog,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
+    });
+    expect(result.exitCode).toBe(0);
+    const gh = await readFile(ghLog, 'utf8').then(
+      text =>
+        text
+          .trim()
+          .split('\n')
+          .map(line => JSON.parse(line) as string[]),
+      () => []
+    );
+    return { result: JSON.parse(stdout(result)) as Record<string, unknown>, gh };
+  }
+
+  for (const [label, pass] of Object.entries(holds)) {
+    test(`the gate holds the planned head with ${label}`, async () => {
+      expect(await gateWith(await stateWith(pass))).toMatchObject({
+        ready: false,
+        summary: expect.stringContaining(`no passing Copilot review of ${url} at head-17`),
+      });
+    });
+
+    test(`an authorized write with ${label} stops before gh`, async () => {
+      const { result, gh } = await executeWith(await stateWith(pass));
+      expect(result).toMatchObject({
+        merged: false,
+        summary: expect.stringContaining('deliver it through archon-deliver'),
+      });
+      expect(gh).toEqual([]);
+    });
+  }
+
+  test('the gate passes and the write merges the head a Copilot review passed', async () => {
+    expect(await gateWith(await stateWith(reviewed))).toMatchObject({ ready: true });
+    const { result, gh } = await executeWith(await stateWith(reviewed));
+    expect(result).toMatchObject({ merged: true });
+    expect(gh[0]).toEqual([
+      'pr',
+      'merge',
+      '17',
+      '--repo',
+      'owner/repo',
+      '--squash',
+      '--match-head-commit',
+      'head-17',
+    ]);
   });
 });
 

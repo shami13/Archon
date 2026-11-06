@@ -67,6 +67,7 @@ deliver__review__publish:
   findings_summary: "stub: no open findings"
   report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
 deliver__gate-ready: '{"ready":"true"}'
+deliver__external-review-policy: { mode: none }
 deliver__review-policy: { risks: "fixture-owned-policy" }
 deliver__classify:
   tier: full

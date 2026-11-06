@@ -62,6 +62,7 @@ classify:
     docs: "stub: no doc-facing changes"
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: failed
   fail-node: gate-validated

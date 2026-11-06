@@ -82,6 +82,7 @@ validate__classify:
 ci-probe: '{"state":"pending","detail":"stub: 1 check still running"}'
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: paused
   reached: [fix__assert-changed, gate-correction-green, recheck__synthesize, gate-ready, gate-validated, ci-probe]

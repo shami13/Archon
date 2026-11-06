@@ -82,6 +82,7 @@ flip-ready: { pr_url: "https://github.com/example/repo/pull/7" }
 outcome: { pr_url: "https://github.com/example/repo/pull/7", summary: "https://github.com/example/repo/pull/7" }
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: completed
   reached: [gate-correction-green, flip-ready]

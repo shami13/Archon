@@ -76,6 +76,7 @@ flip-ready: { pr_url: "https://github.com/example/repo/pull/11" }
 outcome: { pr_url: "https://github.com/example/repo/pull/11", summary: "https://github.com/example/repo/pull/11" }
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: failed
   # The gate fails inside the loop, so the failed set is the node AND its

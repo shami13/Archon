@@ -1,0 +1,100 @@
+# Dry-run fixture: the external review gate is on, Copilot's first review was
+# clean, and a late introduced CI red was fixed after it. The CI fix moved the
+# head, so the new head gets a verification-only Copilot review before the
+# re-wait, and the ready check binds the flip to that head.
+impl__implement:
+  done: true
+  green: true
+  red_cause: ""
+  summary: "stub: implemented and green"
+impl__assert-changed: "3 files changed"
+# gate-green, gate-validated, and gate-ci-fix are deliberately unstubbed: the
+# real gates must accept this run at every gate it reaches.
+pr__pr: { intent: "/fixture/pr-intent.json" }
+pr__publish: { schemaVersion: 1, repo: { host: "github.com", path: "example/repo" }, number: 9, url: "https://github.com/example/repo/pull/9", head: "fixture-branch", base: "dev", is_draft: true, state: "open", head_repo: { host: "github.com", path: "example/repo" }, head_revision: "fixturehead", base_revision: "fixturebase", maintainer_can_modify: null }
+review-policy: { risks: "fixture-owned-policy" }
+classify:
+  tier: full
+  errors: false
+  docs: false
+  reasons:
+    tier: "stub: touches persisted state"
+    errors: "stub: no failure paths"
+    docs: "stub: no doc-facing changes"
+resolve-scope: '{"errors":"false"}'
+review__mode: '{"continuation":false,"head":"fixturehead","cursor":"","risks":"fixture-owned-policy","execution":{"path":"review__mode","invocation":{"loopPath":[]}}}'
+review__coverage: { full: true }
+review__scope:
+  # PR diff in scope; head sha stubbed
+  docs: false
+  pr: { repo: { host: "github.com", path: "example/repo" }, number: 9 }
+review__code: "0 findings"
+review__simplify__simplify: { findings: false }
+review__seams: "0 findings"
+shape__simplify: { findings: false }
+review__tests: "0 findings"
+review__synthesize:
+  ready: true
+  action: none
+  findings_summary: "stub: clean on initial review; CI still running"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+review__publish:
+  ready: true
+  action: none
+  findings_summary: "stub: clean on initial review; CI still running"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+validate__discover: { checks: [{ name: "project gate", argv: ["stub-gate"] }], notes: "stub: the project's aggregate gate" }
+validate__run: { status: green, summary: "stub: full gate green" }
+ci-probe: '{"state":"red","detail":"test (windows-latest) (fail)"}'
+ci-verdict: '{"state":"red","detail":"test (windows-latest) (fail)"}'
+ci-changed: '{"files":["packages/core/src/feature.ts","packages/core/src/feature.test.ts"]}'
+ci-classify:
+  failing_checks: ["test (windows-latest)"]
+  failing_paths: ["packages/core/src/feature.test.ts"]
+  base: passes
+  rerun: not_rerun
+  claim: introduced
+  evidence: "stub: the new test fails on Windows; the base passes"
+ci-fix__implement:
+  done: true
+  green: true
+  red_cause: ""
+  summary: "stub: the branch's new test asserted an unsorted order; fixed at the cause and pushed"
+ci-fix__assert-changed: "1 file changed"
+ci-delta-scope: '{"moved":true}'
+ci-recheck__mode: '{"continuation":true,"head":"fixturehead","cursor":"fixtureprior","risks":"fixture-owned-policy","execution":{"path":"ci-recheck__mode","invocation":{"loopPath":[]}}}'
+ci-recheck__coverage: { full: false }
+ci-recheck__scope:
+  docs: false
+  pr: { repo: { host: "github.com", path: "example/repo" }, number: 9 }
+ci-recheck__synthesize:
+  ready: true
+  action: none
+  findings_summary: "stub: the CI fix is correct and adds no structure"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+ci-recheck__publish:
+  ready: true
+  action: none
+  findings_summary: "stub: the CI fix is correct and adds no structure"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+fix-ci-probe: '{"state":"concluded","detail":"all 9 required check(s) green"}'
+flip-ready: { pr_url: "https://github.com/example/repo/pull/9" }
+outcome: { pr_url: "https://github.com/example/repo/pull/9", summary: "https://github.com/example/repo/pull/9" }
+file-discoveries: '{"issues":[]}'
+file-external-discoveries: '{"issues":[]}'
+fork: '{"fork":true}'
+external-review-policy: { mode: copilot }
+external-observe: { review: "5001", head: "fixturehead", url: "https://github.com/example/repo/pull/9#pullrequestreview-5001", comments: 0 }
+external-triage: { outcome: reviewed, reason: "stub: Copilot found no open issues", overview_findings: [] }
+external-route: { action: clean, corrections: 0 }
+ci-external-observe: { review: "5002", head: "fixturehead2", url: "https://github.com/example/repo/pull/9#pullrequestreview-5002", comments: 0 }
+ci-external-triage: { outcome: reviewed, reason: "stub: Copilot found no open issues in the CI fix", overview_findings: [] }
+ci-external-route: { action: clean, corrections: 0 }
+read-pr-body: { body: "/fixture/pr-body-current.md", url: "https://github.com/example/repo/pull/9" }
+sync-pr-body: { intent: "/fixture/pr-body-intent.json" }
+publish-pr-body: {}
+external-review-ready: { head: "fixturehead2" }
+fixture:
+  expect: completed
+  reached: [external-route, gate-ci-recheck, ci-external-observe, ci-external-triage, ci-external-route, fix-ci-probe, external-review-ready, flip-ready]
+exec-code: true

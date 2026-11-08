@@ -48,10 +48,14 @@ function git(args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString().trim()}`);
 }
 
-/** The pull request's head as git sees it; the REST API can lag a push made moments ago, as `subject` notes. */
+/**
+ * The pull request's head as git sees it; the REST API can lag a push made moments ago, as `subject` notes.
+ * It lands in a ref of its own: check-app fetches in the same checkout at the same time and rewrites FETCH_HEAD.
+ */
 function gitPullHead(number: number): string {
-  git(['fetch', '--quiet', 'origin', `refs/pull/${String(number)}/head`]);
-  const result = Bun.spawnSync(['git', 'rev-parse', 'FETCH_HEAD'], { stdout: 'pipe', stderr: 'ignore' });
+  const ref = `refs/remotes/origin/loop-external-review-${String(number)}`;
+  git(['fetch', '--quiet', 'origin', `+refs/pull/${String(number)}/head:${ref}`]);
+  const result = Bun.spawnSync(['git', 'rev-parse', '--verify', '--quiet', ref], { stdout: 'pipe', stderr: 'ignore' });
   return result.stdout.toString().trim();
 }
 

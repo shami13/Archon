@@ -5,7 +5,7 @@
  * accepts or refuses is visible, and no Codex account is needed.
  */
 import { describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { trackTempRoots } from '@archon/paths/test-utils';
@@ -199,5 +199,72 @@ describe('the external review node of the loop', () => {
     expect(run.code).toBe(0);
     expect(JSON.parse(run.stdout)).toMatchObject({ ran: 'false', reason: expect.stringContaining('nothing was delivered') });
     expect(run.gh).toEqual([]);
+  });
+
+  /** A checkout whose origin has a `dev` base and `refs/pull/7/head`, plus a fake `codex` that finds nothing. */
+  function lapCheckout(): { cwd: string; pullHead: string; other: string; inputs: Record<string, string> } {
+    const root = trackTempRoot(mkdtempSync(join(tmpdir(), 'archon-loop-review-')));
+    const sh = (cwd: string, ...args: string[]): string => {
+      const result = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
+      if (result.exitCode !== 0) throw new Error(`${args.join(' ')}: ${result.stderr.toString()}`);
+      return result.stdout.toString().trim();
+    };
+    const origin = join(root, 'origin.git');
+    const cwd = join(root, 'checkout');
+    sh(root, 'git', 'init', '--quiet', '--bare', origin);
+    sh(root, 'git', 'clone', '--quiet', origin, cwd);
+    const commit = (message: string): string => {
+      sh(cwd, 'git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', message);
+      return sh(cwd, 'git', 'rev-parse', 'HEAD');
+    };
+    commit('base');
+    sh(cwd, 'git', 'push', '--quiet', 'origin', 'HEAD:refs/heads/dev');
+    const other = commit('an earlier head');
+    const pullHead = commit('the pushed head');
+    sh(cwd, 'git', 'push', '--quiet', 'origin', `${pullHead}:refs/pull/7/head`, `${other}:refs/heads/other`);
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, 'codex'),
+      '#!/bin/sh\nwhile [ "$1" != "--output-last-message" ]; do shift; done\nprintf \'%s\' \'{"findings":[],"assessment":"fine"}\' > "$2"\n',
+      { mode: 0o755 }
+    );
+    const state = join(root, 'state');
+    mkdirSync(state);
+    return {
+      cwd,
+      pullHead,
+      other,
+      inputs: { INPUTS_PR: URL, ARCHON_SDLC_EXTERNAL_REVIEW: 'codex', STATE_DIR: state, WORKFLOW_ID: 'run-1', PATH: `${bin}:${process.env.PATH ?? ''}` },
+    };
+  }
+
+  const pullAt = (sha: string): Record<string, unknown> => ({
+    state: 'open',
+    head: { sha },
+    base: { ref: 'dev' },
+    requested_reviewers: [],
+  });
+
+  it('reviews the head git sees when the REST API still reports the head before the push', () => {
+    const lap = lapCheckout();
+    const run = runPackScript('loop/scripts/external-review', {
+      cwd: lap.cwd,
+      gh: { pull: pullAt(lap.other) },
+      inputs: { ...lap.inputs, INPUTS_HEAD: lap.pullHead },
+    });
+    expect(run.stderr).toBe('');
+    expect(JSON.parse(run.stdout)).toMatchObject({ ran: 'true', head: lap.pullHead, blocking: 0 });
+  });
+
+  it('refuses a head the pull request has moved past', () => {
+    const lap = lapCheckout();
+    const run = runPackScript('loop/scripts/external-review', {
+      cwd: lap.cwd,
+      gh: { pull: pullAt('b'.repeat(40)) },
+      inputs: { ...lap.inputs, INPUTS_HEAD: lap.other },
+    });
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain(`the pull request head is ${lap.pullHead}, not ${lap.other}`);
   });
 });

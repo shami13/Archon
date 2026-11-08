@@ -76,6 +76,8 @@ export interface GhFake {
   readonly writeFail?: string;
   /** Drop the write instead of applying it, so the read-back disagrees. */
   readonly writeLost?: boolean;
+  /** What `gh api repos/<repo>/pulls/<n>` returns; omit when the script reads no pull request. */
+  readonly pull?: Readonly<Record<string, unknown>>;
 }
 
 export type ForgeFake =
@@ -224,6 +226,7 @@ Object.defineProperty(Bun, 'spawnSync', { value: (argv, settings) => {
     const apiHost = argv[argv.indexOf('--hostname') + 1];
     const apiPath = endpoint.split('/').slice(1, 3).join('/');
     const url = (id) => 'https://' + apiHost + '/' + apiPath + '/pull/' + String(pr.number) + '#issuecomment-' + String(id);
+    if (fake.pull !== undefined && endpoint.includes('/pulls/')) return result(0, JSON.stringify(fake.pull));
     if (endpoint.endsWith('/issues/7')) return result(0, JSON.stringify({ number: 7, html_url: 'https://' + apiHost + '/' + apiPath + '/issues/7', labels: [...new Set(issueLabels)].map(name => ({ name })) }));
     const method = argv.includes('--method') ? argv[argv.indexOf('--method') + 1] : 'GET';
     if (method === 'GET') {

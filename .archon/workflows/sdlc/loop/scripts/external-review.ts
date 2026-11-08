@@ -48,6 +48,13 @@ function git(args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString().trim()}`);
 }
 
+/** The pull request's head as git sees it; the REST API can lag a push made moments ago, as `subject` notes. */
+function gitPullHead(number: number): string {
+  git(['fetch', '--quiet', 'origin', `refs/pull/${String(number)}/head`]);
+  const result = Bun.spawnSync(['git', 'rev-parse', 'FETCH_HEAD'], { stdout: 'pipe', stderr: 'ignore' });
+  return result.stdout.toString().trim();
+}
+
 function skip(reason: string): void {
   emit({ ran: 'false', reason, review: '', head, blocking: 0, findings: '' });
 }
@@ -71,8 +78,9 @@ function review(): void {
   try {
     const pull = readPull(ghApi, ref);
     if (pull.state !== 'open') throw new Error(`${pullUrl(ref)} is ${pull.state}, not open`);
-    if (pull.head !== head) {
-      throw new Error(`the pull request head is ${pull.head}, not ${head}, the head this lap checks`);
+    const current = pull.head === head ? head : gitPullHead(ref.number);
+    if (current !== head) {
+      throw new Error(`the pull request head is ${current}, not ${head}, the head this lap checks`);
     }
     const observed = observe(ledger, pullUrl(ref), pull.base);
     writeObservation(artifactsDir(), ledger, ref, observed);

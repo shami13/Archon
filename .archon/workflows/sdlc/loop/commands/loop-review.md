@@ -26,8 +26,8 @@ $INPUTS.evidence_problems
 ```
 
 The external review of the head (empty on the complex route, whose delivery gate already ran it;
-`ran` is `false` when no external reviewer runs on this route; otherwise `blocking` counts the
-findings listed in the file `findings`):
+`ran` is `false` when no external reviewer runs on this route or the gate already passed this
+head; otherwise `blocking` counts the findings listed in the file `findings`):
 
 ```
 $INPUTS.external_review

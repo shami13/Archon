@@ -86,6 +86,11 @@ function review(): void {
     if (current !== head) {
       throw new Error(`the pull request head is ${current}, not ${head}, the head this lap checks`);
     }
+    // A delivery gate that already settled this head (clean or adjudicated) is what the merge gate reads.
+    if (ledger.ready(head)) {
+      skip(`the external review gate already passed ${head}, so its findings do not block it again`);
+      return;
+    }
     const observed = observe(ledger, pullUrl(ref), pull.base);
     writeObservation(artifactsDir(), ledger, ref, observed);
     const findings = findingsOf(observed.comments, [], 'codex');

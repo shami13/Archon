@@ -267,4 +267,21 @@ describe('the external review node of the loop', () => {
     expect(run.code).not.toBe(0);
     expect(run.stderr).toContain(`the pull request head is ${lap.pullHead}, not ${lap.other}`);
   });
+
+  it('does not re-block a head the delivery gate already adjudicated', () => {
+    const lap = lapCheckout();
+    Ledger.forPull(lap.inputs.STATE_DIR ?? '', REF, 'run-0').recordVerdict({
+      review: `codex-${lap.pullHead}`,
+      head: lap.pullHead,
+      verdict: 'adjudicated',
+      findings: 1,
+    });
+    const run = runPackScript('loop/scripts/external-review', {
+      cwd: lap.cwd,
+      gh: { pull: pullAt(lap.pullHead) },
+      inputs: { ...lap.inputs, INPUTS_HEAD: lap.pullHead },
+    });
+    expect(run.stderr).toBe('');
+    expect(JSON.parse(run.stdout)).toMatchObject({ ran: 'false', blocking: 0, reason: expect.stringContaining('already passed') });
+  });
 });

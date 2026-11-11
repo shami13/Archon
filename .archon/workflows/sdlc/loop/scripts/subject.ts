@@ -14,7 +14,7 @@ import { closes } from '../../.shared/workable.ts';
 const started = String(Date.now());
 const target = trimmed(process.env.INPUTS_TARGET);
 const chosen = trimmed(process.env.INPUTS_PR);
-const reports = `${trimmed(process.env.INPUTS_BUILDER)}\n${trimmed(process.env.INPUTS_SHIP)}`;
+const reports = `${trimmed(process.env.INPUTS_PUBLISH)}\n${trimmed(process.env.INPUTS_BUILDER)}\n${trimmed(process.env.INPUTS_SHIP)}`;
 
 function gh(args: string[]): unknown {
   const result = Bun.spawnSync(['gh', ...args], { stdout: 'pipe', stderr: 'pipe' });

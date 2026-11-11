@@ -117,6 +117,66 @@ nodes:
       reason: "$pick.output.reason"
       runtime: "$INPUTS.runtime"
 
+  # Codex reads the builder's commit before it leaves the checkout. Nothing is pushed
+  # until the review has no blocking finding or three correction rounds are spent;
+  # then publish pushes, opens or updates the pull request with the review's summary
+  # in its body, and keeps the review beside the pull request's ledger, so the gate
+  # after the push reuses it instead of reviewing the same head twice.
+  - id: gate
+    depends_on: [build]
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    loop_group:
+      until_bash: |
+        value=$pre-review.output.clean
+        test "$value" = "true"
+      max_iterations: 3
+      fresh_context: true
+      nodes:
+        - id: pre-review
+          script: pre-review
+          runtime: bun
+          timeout: 1620000
+          with:
+            builder: "$build.output"
+            pr: "$pick.output.pr"
+          output_format:
+            type: object
+            properties:
+              head: { type: string }
+              clean: { type: string, enum: ["true", "false"] }
+              blocking: { type: integer }
+              review: { type: string }
+              summary: { type: string }
+            required: [head, clean, blocking, review, summary]
+        - id: fix
+          command: loop-fix
+          context: fresh
+          idle_timeout: 2700000
+          depends_on: [pre-review]
+          when: "$pre-review.output.clean == 'false'"
+          with:
+            review: "$pre-review.output.review"
+            builder: "$build.output"
+            target: "$pick.output.target"
+            runtime: "$INPUTS.runtime"
+
+  - id: publish
+    script: publish
+    runtime: bun
+    depends_on: [gate]
+    trigger_rule: all_done
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    with:
+      builder: "$build.output"
+      pr: "$pick.output.pr"
+      target: "$pick.output.target"
+    output_format:
+      type: object
+      properties:
+        pr: { type: string }
+        head: { type: string }
+      required: [pr, head]
+
   # Complex work: the full shipping pipeline (triage, investigate or plan,
   # implement, multi-lens review, CI) up to a ready pull request. Ordered after
   # build only so the two never run together; pick makes them exclusive.
@@ -136,12 +196,13 @@ nodes:
   - id: subject
     script: subject
     runtime: bun
-    depends_on: [claim, build, ship]
+    depends_on: [claim, build, publish, ship]
     trigger_rule: all_done
     when: "$pick.output.route != 'none' && $claim.output.held == 'true'"
     with:
       target: "$pick.output.target"
       pr: "$pick.output.pr"
+      publish: { from: "$publish.output", if_skipped: "" }
       builder: { from: "$build.output", if_skipped: "" }
       ship: { from: "$ship.output", if_skipped: "" }
     output_format:
@@ -156,7 +217,8 @@ nodes:
 
   # The external review of a loop-built head. archon-deliver's gate reviews a
   # complex lap's pull request, so this runs on the simple and continue routes
-  # only. With the Codex policy it reviews the head the app check tests, in a
+  # only. With the Codex policy it reads the review publish stored for this head
+  # (the pre-push one) and runs Codex only for a head no review covers, in a
   # worktree of its own; any other policy answers `ran: false`. The reviewer gives
   # every blocking finding a disposition, as it does for the app check's lines.
   - id: external-review

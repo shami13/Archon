@@ -17,6 +17,8 @@ subject:
   base: main
   files: "app/notes.py"
   started: "1700000000000"
+pre-review: { head: "def5678", clean: "true", blocking: 0, review: "/fixture/pre-review/def5678.json", summary: "stub: Codex pre-push review of def5678: approve, 0 advisory note(s)." }
+publish: { pr: "https://github.com/example/app/pull/7", head: "def5678" }
 check-app:
   pr: "https://github.com/example/app/pull/7"
   head: "def5678"
@@ -54,7 +56,7 @@ release: "released 1 claim(s)"
 external-review: { ran: "true", reason: "stub: Codex found nothing that blocks this head", review: "codex-fixturehead", head: "fixturehead", blocking: 0, findings: "/fixture/external-review/findings.json" }
 fixture:
   expect: completed
-  reached: [pick, claim, build, subject, external-review, check-app, evidence, review, release]
+  reached: [pick, claim, build, pre-review, publish, subject, external-review, check-app, evidence, review, release]
   resolved-text-contains:
     build: "https://github.com/example/app/pull/7"
     check-app: "Pull request: https://github.com/example/app/pull/7"

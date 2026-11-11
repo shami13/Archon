@@ -15,7 +15,8 @@
  * and the first stored review wins for both.
  */
 
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { Ledger, Observation, ReviewComment } from './external-review.ts';
 import { record } from './forge.ts';
@@ -264,24 +265,32 @@ export interface CodexObserveOptions {
   readonly now: () => number;
 }
 
-/**
- * The Codex review of `head`: the stored one when this pull request already has it,
- * otherwise a new read-only Codex run in the checkout, stored first-writer-wins.
- * A failed or malformed run stops the gate and stores nothing, so a resume runs it again.
- */
-export function observeCodexReview(head: string, options: CodexObserveOptions): Observation {
-  const dir = storeDir(options.ledger);
-  const path = join(dir, `${head}.json`);
-  if (existsSync(path)) return observationOf(options.url, readStored(path));
+export interface CodexRunOptions {
+  /** The checkout at `head`. */
+  readonly cwd: string;
+  /** What the review is of: the pull request URL, or the branch when there is no pull request yet. */
+  readonly url: string;
+  /** The branch the change merges into. */
+  readonly base: string;
+  readonly history: readonly CodexReview[];
+  readonly runner: CodexRunner;
+  readonly fetchBase: (cwd: string, base: string) => void;
+  readonly now: () => number;
+}
 
+/**
+ * One fresh read-only Codex review of `head` in the checkout, typed. Nothing is stored:
+ * the gate stores it beside the pull request's ledger, the loop's pre-push review in the
+ * run's artifacts. A failed or malformed run throws, so the caller runs it again.
+ */
+export function runCodexReview(head: string, options: CodexRunOptions): CodexReview {
   options.fetchBase(options.cwd, options.base);
-  const scratch = join(dir, `.${head}.${String(process.pid)}`);
-  mkdirSync(scratch, { recursive: true });
+  const scratch = mkdtempSync(join(tmpdir(), 'archon-codex-review-'));
   try {
     const schemaPath = join(scratch, 'schema.json');
     const outputPath = join(scratch, 'output.json');
     writeFileSync(schemaPath, JSON.stringify(CODEX_OUTPUT_SCHEMA));
-    const prompt = codexPrompt({ url: options.url, base: options.base, head, history: history(options.ledger, head) });
+    const prompt = codexPrompt({ url: options.url, base: options.base, head, history: options.history });
     const run = options.runner({ cwd: options.cwd, prompt, schemaPath, outputPath });
     if (run.exitCode !== 0) {
       const tail = run.stderr.trim().split('\n').slice(-3).join(' ');
@@ -290,22 +299,44 @@ export function observeCodexReview(head: string, options: CodexObserveOptions): 
       );
     }
     if (!existsSync(outputPath)) throw new Error(`Codex wrote no review of ${head}; resume this run to review it again`);
-    const review: CodexReview = {
+    return {
       id: `codex-${head}`,
       head,
       base: options.base,
       reviewedAt: new Date(options.now()).toISOString(),
       ...parseCodexOutput(readFileSync(outputPath, 'utf8')),
     };
-    const candidate = join(scratch, 'review.json');
-    writeFileSync(candidate, `${JSON.stringify(review, null, 2)}\n`);
-    try {
-      linkSync(candidate, path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    return observationOf(options.url, readStored(path));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+/** Keeps `review` as the pull request's review of its head, first writer wins; a review already there stays. */
+export function storeReview(ledger: Ledger, review: CodexReview): void {
+  const dir = storeDir(ledger);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${review.head}.json`);
+  const candidate = join(dir, `.${review.head}.${String(process.pid)}.json`);
+  writeFileSync(candidate, `${JSON.stringify(review, null, 2)}\n`);
+  try {
+    linkSync(candidate, path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  } finally {
+    rmSync(candidate, { force: true });
+  }
+}
+
+/**
+ * The Codex review of `head`: the stored one when this pull request already has it,
+ * otherwise a new read-only Codex run in the checkout, stored first-writer-wins.
+ * A failed or malformed run stops the gate and stores nothing, so a resume runs it again.
+ */
+export function observeCodexReview(head: string, options: CodexObserveOptions): Observation {
+  const dir = storeDir(options.ledger);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${head}.json`);
+  if (existsSync(path)) return observationOf(options.url, readStored(path));
+  storeReview(options.ledger, runCodexReview(head, { ...options, history: history(options.ledger, head) }));
+  return observationOf(options.url, readStored(path));
 }

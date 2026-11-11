@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
-import { canonicalRepoOfOrigin, gitSshCommand, repoOfOrigin, sshProbeArgs } from '../../workflows/sdlc/.shared/builder-report';
+import { canonicalRepoOfOrigin, gitSshCommand, probeShell, repoOfOrigin, sshProbeArgs } from '../../workflows/sdlc/.shared/builder-report';
 import { abandonedContinuation, refuseBaseBranch, reviewSection, samePullRequest } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
@@ -104,5 +104,24 @@ describe('samePullRequest', () => {
     expect(samePullRequest('https://github.com/Example/Repo/pull/7/', 'https://github.com/example/repo/pull/7')).toBe(true);
     expect(samePullRequest('https://github.com/example/repo/pull/7', 'https://github.com/example/repo/pull/8')).toBe(false);
     expect(samePullRequest('https://github.com/example/repo/pull/7', 'https://github.com/example/other/pull/7')).toBe(false);
+  });
+});
+
+describe('probeShell', () => {
+  it('takes ARCHON_BASH_PATH first, Git Bash on Windows, sh elsewhere', () => {
+    expect(probeShell({ ARCHON_BASH_PATH: '/opt/bash' }, 'win32')).toBe('/opt/bash');
+    expect(probeShell({}, 'linux')).toBe('sh');
+    expect(probeShell({ ProgramFiles: 'C:\\PF' }, 'win32')).toBe('C:\\PF\\Git\\bin\\bash.exe');
+  });
+
+  it('leaves the alias as written when no shell can run the probe', () => {
+    const before = process.env.ARCHON_BASH_PATH;
+    process.env.ARCHON_BASH_PATH = '/nonexistent/bash';
+    try {
+      expect(canonicalRepoOfOrigin('git@work-alias:example/repo.git')).toEqual({ host: 'work-alias', path: 'example/repo' });
+    } finally {
+      if (before === undefined) delete process.env.ARCHON_BASH_PATH;
+      else process.env.ARCHON_BASH_PATH = before;
+    }
   });
 });

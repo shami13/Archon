@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { pullRefOf } from './external-review.ts';
 
 /**
@@ -106,9 +107,34 @@ export function canonicalRepoOfOrigin(remote: string): { host: string; path: str
   const repo = repoOfOrigin(remote);
   if (/^https?:\/\//.test(remote.trim())) return repo;
   // Git's own ssh command, so an alias or option it carries (-o HostName=...) counts here as it does for the push.
-  const probe = Bun.spawnSync(['sh', '-c', `${gitSshCommand()} "$@"`, 'sh', ...sshProbeArgs(remote, repo.host)], { stdout: 'pipe', stderr: 'ignore' });
-  const hostname = /^hostname (\S+)$/m.exec(probe.stdout.toString())?.[1];
-  return hostname === undefined || probe.exitCode !== 0 ? repo : { host: forgeHost(hostname), path: repo.path };
+  let output = '';
+  try {
+    const probe = Bun.spawnSync([probeShell(), '-c', `${gitSshCommand()} "$@"`, 'sh', ...sshProbeArgs(remote, repo.host)], { stdout: 'pipe', stderr: 'ignore' });
+    if (probe.exitCode === 0) output = probe.stdout.toString();
+  } catch {
+    // No shell to probe with: the alias stays as written, as it did before the probe existed.
+  }
+  const hostname = /^hostname (\S+)$/m.exec(output)?.[1];
+  return hostname === undefined ? repo : { host: forgeHost(hostname), path: repo.path };
+}
+
+/**
+ * The shell that runs the probe: ARCHON_BASH_PATH when set, Git Bash where Windows installs it,
+ * plain sh elsewhere. shortcut: mirrors resolveBashPath in packages/git, upgrade when this pack
+ * may import @archon/git.
+ */
+export function probeShell(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
+  if (env.ARCHON_BASH_PATH) return env.ARCHON_BASH_PATH;
+  if (platform !== 'win32') return 'sh';
+  const programFiles = env.ProgramFiles ?? 'C:\\Program Files';
+  const candidates = [
+    `${programFiles}\\Git\\bin\\bash.exe`,
+    `${programFiles}\\Git\\usr\\bin\\bash.exe`,
+    `${env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'}\\Git\\bin\\bash.exe`,
+    ...(env.LOCALAPPDATA ? [`${env.LOCALAPPDATA}\\Programs\\Git\\bin\\bash.exe`] : []),
+    ...(env.USERPROFILE ? [`${env.USERPROFILE}\\scoop\\apps\\git\\current\\bin\\bash.exe`] : []),
+  ];
+  return candidates.find(candidate => existsSync(candidate)) ?? candidates[0] ?? 'bash';
 }
 
 /**

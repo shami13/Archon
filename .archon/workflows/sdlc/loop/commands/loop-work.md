@@ -20,7 +20,7 @@ The move:
 
 Ask before you build. When the only way to meet the work item changes what an in-repository check judges (a lower or re-pinned threshold, a re-recorded or re-pinned reference a check compares against, a new skip or excuse) and neither the owner's approval nor a contract criterion asks for it, or needs a look the work item leaves open, that is a decision only the owner can make: treat it as below the moment you see it, before building, not after.
 
-If the move turns out to be wrong (the pull request was already merged, the issue is already done, or a decision only the owner can make blocks it), do not force it: comment what you found, label the item `needs-owner` if it needs a decision, and report `PR: none`.
+If the move turns out to be wrong (the pull request was already merged, the issue is already done, or a decision only the owner can make blocks it), do not force it: comment what you found, label the item `needs-owner` if it needs a decision, and report `PUBLISH: no` (and `PR: none` when you continued nothing).
 
 ## Do it
 
@@ -49,3 +49,4 @@ Finish with these lines, each on its own, so the loop can review and push your c
 `BRANCH: <the branch your commit is on>`
 `COMMIT: <its full SHA>`, or `COMMIT: none` when you committed nothing
 `PR: <full pull request URL>` for a continued pull request, or `PR: none` followed by one sentence saying why (also when the move turned out to be wrong and you committed nothing).
+`PUBLISH: yes` when your commit is to be pushed and the pull request opened or brought up to date; `PUBLISH: no` when the move turned out to be wrong or needs the owner's decision, also for a commit you made before finding that out: nothing of yours is pushed then. Without the line the loop publishes.

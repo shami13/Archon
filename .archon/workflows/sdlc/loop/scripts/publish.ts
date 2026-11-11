@@ -16,12 +16,12 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalRepoOfOrigin, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, publicationDeclined, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource, sameRepo, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
 import { artifactsDir, emit, refuse, runId, stateDir, trimmed } from '../../.shared/io.ts';
-import { createPr, editPrBody, findOpenPrByHead, markPrReady, upsertComment, viewPr } from '../../.shared/pr.ts';
+import { createPr, editPrBody, findPrByHead, markPrReady, upsertComment, viewPr } from '../../.shared/pr.ts';
 
 const BLOCKING = ['P0', 'P1', 'P2'];
 
@@ -99,6 +99,12 @@ function publish(): void {
   const upstream = trimmed(process.env.INPUTS_PR);
   const files = join(artifactsDir(), 'pull-request');
   const source = forgeSource();
+  // The builder's decision comes first, on both routes: a clean review of a commit it made before giving the move up
+  // (an owner's decision needed, a wrong pick) does not push it or touch a pull request.
+  if (publicationDeclined(builder)) {
+    emit({ pr: '', head, published: 'false', reason: 'the builder reports PUBLISH: no; nothing is pushed or written' });
+    return;
+  }
   // This node runs whatever the gate did, so that a failed gate is a fact downstream reads
   // (`published: "false"`, no pull request this lap) rather than a hole in the graph. It pushes
   // only when the latest review is of HEAD and clean.
@@ -178,8 +184,12 @@ function publish(): void {
   // covers an attempt that died before it could remember.
   const createdPath = join(artifactsDir(), 'pull-request-created.json');
   const earlier = readIf(createdPath);
-  const remembered = earlier === undefined ? undefined : (JSON.parse(earlier) as { url?: unknown }).url;
-  let url = upstream || reported || (typeof remembered === 'string' ? remembered : '') || findOpenPrByHead(repo, repo, branch, source)?.pr.url || '';
+  const receipt = earlier === undefined ? {} : (JSON.parse(earlier) as { url?: unknown; attempt?: unknown });
+  const remembered = typeof receipt.url === 'string' ? receipt.url : '';
+  // An attempt recorded without a URL may have created the pull request and died before reading it back; a pull
+  // request on this branch in any state is that one, and a closed one is the owner's word against a second.
+  const anyState = receipt.attempt !== undefined && remembered === '';
+  let url = upstream || reported || remembered || findPrByHead(repo, repo, branch, source, anyState ? 'all' : 'open')?.pr.url || '';
   if (url !== '') {
     const existing = viewPr(pullRefOf(url), source).pr;
     // A pull request merged or closed while Codex reviewed gets no push: its branch is history now.
@@ -203,6 +213,8 @@ function publish(): void {
     const body = readIf(join(files, 'body.md')) ?? (issue === undefined ? '' : `Closes #${issue}\n`);
     writeFileSync(bodyPath, withCodexReviewSection(body, section));
     const title = (readIf(join(files, 'title.txt')) ?? git(['log', '-1', '--format=%s'])).trim();
+    // The attempt is on record before the forge is asked, so a death between creation and read-back is found again.
+    writeFileSync(createdPath, `${JSON.stringify({ attempt: { branch, head } })}\n`);
     const created = createPr(
       { repo, headRepo: repo, head: branch, headRevision: head, base: review.base, title, bodyPath, draft: false },
       source

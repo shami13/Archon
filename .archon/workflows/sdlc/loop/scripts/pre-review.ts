@@ -15,7 +15,7 @@
  */
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalRepoOfOrigin, rawLine, reportLine } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, publicationDeclined, rawLine, reportLine } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
 import { pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource } from '../../.shared/forge.ts';
@@ -64,6 +64,12 @@ function review(): void {
   if (written === undefined) throw new Error("the builder's report has no COMMIT line; nothing is reviewed or pushed");
   const committed = reportLine(builder, 'COMMIT');
   if (committed !== undefined && !/^[0-9a-f]{7,40}$/i.test(committed)) throw new Error(`the builder's COMMIT line (${committed}) is not a commit SHA`);
+  if (publicationDeclined(builder)) {
+    // The builder keeps its commit off origin (PUBLISH: no); Codex is not asked about a commit nobody will push.
+    writeFileSync(join(dir, 'none.json'), `${JSON.stringify({ head })}\n`);
+    emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder declined publication (PUBLISH: no); nothing is reviewed or pushed' });
+    return;
+  }
   if (committed === undefined) {
     // publish reads this record: a no-commit path the gate completed, for this HEAD, not a gate that failed.
     writeFileSync(join(dir, 'none.json'), `${JSON.stringify({ head })}\n`);

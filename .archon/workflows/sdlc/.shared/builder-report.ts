@@ -12,7 +12,7 @@ import { pullRefOf } from './external-review.ts';
  * `none` (with or without the sentence the builder adds after it). `PR` is a pull request URL
  * or nothing: the builder's explanation never passes as one.
  */
-export function reportLine(report: string, key: 'BRANCH' | 'COMMIT' | 'PR'): string | undefined {
+export function reportLine(report: string, key: 'BRANCH' | 'COMMIT' | 'PR' | 'PUBLISH'): string | undefined {
   const value = rawLine(report, key);
   if (value === undefined || /^none\b/i.test(value)) return undefined;
   if (key === 'PR') {
@@ -28,10 +28,15 @@ export function reportLine(report: string, key: 'BRANCH' | 'COMMIT' | 'PR'): str
 }
 
 /** The last `KEY: value` line as written (backticks around it tolerated), or undefined when there is none. */
-export function rawLine(report: string, key: 'BRANCH' | 'COMMIT' | 'PR'): string | undefined {
+export function rawLine(report: string, key: 'BRANCH' | 'COMMIT' | 'PR' | 'PUBLISH'): string | undefined {
   const matches = [...report.matchAll(new RegExp(`^\`?${key}:[ \\t]*(.+?)\`?[ \\t]*$`, 'gm'))];
   const value = matches[matches.length - 1]?.[1];
   return value === undefined || value === '' ? undefined : value;
+}
+
+/** The builder's own publication decision: `PUBLISH: no` keeps a commit it made off origin, on either route. */
+export function publicationDeclined(report: string): boolean {
+  return /^no\b/i.test(rawLine(report, 'PUBLISH') ?? '');
 }
 
 export const CODEX_REVIEW_HEADING = '## Codex review';
@@ -56,10 +61,6 @@ export function withCodexReviewSection(body: string, section: string): string {
       if (line.includes('-->')) comment = false;
       return;
     }
-    if (fence === undefined && /^ {0,3}<!--/.test(line)) {
-      if (!line.includes('-->')) comment = true;
-      return;
-    }
     const run = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (run !== null && fence === undefined) {
       fence = { char: run[1]?.charAt(0) ?? '', length: run[1]?.length ?? 0 };
@@ -71,6 +72,9 @@ export function withCodexReviewSection(body: string, section: string): string {
       if (closes) fence = undefined;
       return;
     }
+    // An unclosed `<!--` anywhere on the line starts a comment block; what stands before it still counts here.
+    const open = line.indexOf('<!--');
+    if (open !== -1 && !line.includes('-->', open + 4)) comment = true;
     // A level-one or level-two heading, indented up to three spaces as Markdown allows, ends a section.
     if (/^ {0,3}#{1,2}[ \t]/.test(line)) headings.push(index);
     // A Setext heading: a text line underlined with = or - on the next line.

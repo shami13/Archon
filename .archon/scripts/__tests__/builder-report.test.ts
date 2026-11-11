@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { forgeHost, rawLine, reportLine, withCodexReviewSection } from '../../workflows/sdlc/.shared/builder-report';
+import { forgeHost, publicationDeclined, rawLine, reportLine, withCodexReviewSection } from '../../workflows/sdlc/.shared/builder-report';
 
 describe('reportLine', () => {
   it('reads the last KEY: value line of a report', () => {
@@ -30,6 +30,11 @@ describe('reportLine', () => {
 });
 
 describe('withCodexReviewSection', () => {
+  it('leaves a commented example alone when the comment opens after other text', () => {
+    const body = 'Intro <!-- Template instructions:\n## Codex review\nExample only.\n-->\n\n## Evidence\n\n- C1: ok\n';
+    expect(withCodexReviewSection(body, 'Codex: approve')).toBe(`${body}\n## Codex review\n\nCodex: approve\n`);
+  });
+
   it('leaves a commented example of the heading alone and keeps the comment closed', () => {
     const body = '<!-- Template instructions:\n## Codex review\nExample only.\n-->\n\n## Evidence\n\n- C1: ok\n';
     expect(withCodexReviewSection(body, 'Codex: approve')).toBe(`${body}\n## Codex review\n\nCodex: approve\n`);
@@ -95,5 +100,13 @@ describe('forgeHost', () => {
   it('maps GitHub SSH-over-443 to github.com and leaves other hosts as they are', () => {
     expect(forgeHost('ssh.github.com')).toBe('github.com');
     expect(forgeHost('GitHub.Company.Test')).toBe('github.company.test');
+  });
+});
+
+describe('publicationDeclined', () => {
+  it('is a PUBLISH: no line, whatever follows it, and nothing else', () => {
+    expect(publicationDeclined('BRANCH: b\nCOMMIT: abc\nPUBLISH: no, the owner must decide\nPR: none')).toBe(true);
+    expect(publicationDeclined('BRANCH: b\nCOMMIT: abc\nPUBLISH: yes\nPR: none')).toBe(false);
+    expect(publicationDeclined('BRANCH: b\nCOMMIT: abc\nPR: none')).toBe(false);
   });
 });

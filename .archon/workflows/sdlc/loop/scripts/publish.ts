@@ -19,9 +19,9 @@ import { join } from 'node:path';
 import { reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
-import { forgeSource, type QualifiedPr } from '../../.shared/forge.ts';
+import { forgeSource, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
 import { artifactsDir, emit, refuse, runId, stateDir, trimmed } from '../../.shared/io.ts';
-import { createPr, editPrBody, findOpenPrByHead, markPrReady, viewPr } from '../../.shared/pr.ts';
+import { createPr, editPrBody, findOpenPrByHead, markPrReady, upsertComment, viewPr } from '../../.shared/pr.ts';
 
 const BLOCKING = ['P0', 'P1', 'P2'];
 
@@ -31,21 +31,41 @@ function git(args: string[]): string {
   return result.stdout.toString().trim();
 }
 
-function gh(args: string[]): string {
-  const result = Bun.spawnSync(['gh', ...args], { stdout: 'pipe', stderr: 'pipe' });
-  if (result.exitCode !== 0) throw new Error(`gh ${args.slice(0, 2).join(' ')} failed: ${result.stderr.toString().trim()}`);
-  return result.stdout.toString().trim();
-}
-
 function readIf(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
 
-/** The repository origin points at, host included, from an https or ssh remote URL. */
+/** The builder's one comment for this run, written once however often this node is resumed. */
+function leaveComment(ref: QualifiedPr, source: ForgeSource): void {
+  const comment = readIf(join(artifactsDir(), 'pull-request', 'comment.md'));
+  if (comment === undefined || comment.trim() === '') return;
+  const marker = `<!-- archon-loop builder ${runId()} -->`;
+  const path = join(artifactsDir(), 'pull-request-comment.md');
+  writeFileSync(path, `${marker}\n${comment}`);
+  upsertComment(ref, marker, path, source);
+}
+
+/** The repository origin points at, host included, from an https, ssh:// or scp-style remote. */
 export function repoOfOrigin(remote: string): QualifiedPr['repo'] {
-  const match = /^(?:https?:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/|(?:ssh:\/\/)?(?:[^@]+@)?([^/:]+):(?:\d+\/)?)([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote.trim());
-  if (match === null) throw new Error(`origin ${remote.trim()} is not a GitHub repository URL this loop can publish to`);
-  return { host: (match[1] ?? match[2] ?? '').toLowerCase(), path: match[3] ?? '' };
+  const value = remote.trim();
+  const scp = /^(?:[^@/]+@)?([^/:]+):([^/].*)$/.exec(value);
+  let host: string;
+  let path: string;
+  if (scp !== null && !value.includes('://')) {
+    [, host, path] = scp as unknown as [string, string, string];
+  } else {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new Error(`origin ${value} is not a repository URL this loop can publish to`);
+    }
+    host = url.hostname;
+    path = url.pathname.replace(/^\/+/, '');
+  }
+  path = path.replace(/\/+$/, '').replace(/\.git$/, '');
+  if (host === '' || !/^[^/]+\/[^/]+$/.test(path)) throw new Error(`origin ${value} is not a repository URL this loop can publish to`);
+  return { host: host.toLowerCase(), path };
 }
 
 /** What the body says about the review: its summary line, plus any blocking finding it still names. */
@@ -103,8 +123,7 @@ function publish(): void {
       writeFileSync(bodyPath, body);
       editPrBody(ref, bodyPath, source);
     }
-    const comment = readIf(join(files, 'comment.md'));
-    if (comment !== undefined && comment.trim() !== '') gh(['pr', 'comment', kept, '--body-file', join(files, 'comment.md')]);
+    leaveComment(ref, source);
     if (current.pr.is_draft) markPrReady(ref, source);
     emit({ pr: kept, head, published: 'true', reason: 'the builder committed nothing; the pull request was brought up to date' });
     return;
@@ -149,8 +168,7 @@ function publish(): void {
     editPrBody(ref, bodyPath, source);
     if (current.pr.is_draft) markPrReady(ref, source);
   }
-  const comment = readIf(join(files, 'comment.md'));
-  if (comment !== undefined && comment.trim() !== '') gh(['pr', 'comment', url, '--body-file', join(files, 'comment.md')]);
+  leaveComment(pullRefOf(url), source);
   storeReview(Ledger.forPull(stateDir(), pullRefOf(url), runId()), review);
   emit({ pr: url, head, published: 'true', reason: `pushed ${head.slice(0, 7)} after a clean review` });
 }

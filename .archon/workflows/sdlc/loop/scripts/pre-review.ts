@@ -55,6 +55,8 @@ function review(): void {
   // Which review this is in this run: one file per reviewed head is already there for each earlier round.
   const round = String(readdirSync(dir).filter(name => name.endsWith('.json') && name !== 'latest.json').length + 1);
   const head = git(['rev-parse', 'HEAD']);
+  // Codex reads the working tree; it must be the commit that gets pushed, nothing more and nothing less.
+  if (git(['status', '--porcelain']) !== '') throw new Error('the checkout has uncommitted or untracked changes; commit or remove them before the review');
   // A builder that committed nothing (the move was wrong, or a decision is the owner's) reports no COMMIT.
   const committed = reportLine(builder, 'COMMIT');
   if (committed === undefined) {

@@ -101,11 +101,39 @@ export function codexExecutable(pin: string | undefined = process.env.CODEX_BIN_
   }
 }
 
+/**
+ * The config switches that leave the reviewer with no tool but the read-only sandbox: no
+ * plugins, no ChatGPT apps, and every MCP server the user's or the project's config.toml
+ * names turned off. The same switches a scoped workflow node rides on, as `-c` overrides.
+ */
+export function reviewScope(configs: readonly string[]): string[] {
+  const servers = new Set<string>();
+  for (const text of configs) {
+    for (const match of text.matchAll(/^\s*\[mcp_servers\.("?)([^\]"]+)\1\]/gm)) servers.add(match[2] ?? '');
+  }
+  return [
+    '-c', 'features.plugins=false',
+    '-c', 'features.apps=false',
+    ...[...servers].filter(name => name !== '').sort().flatMap(name => ['-c', `mcp_servers.${JSON.stringify(name)}.enabled=false`]),
+  ];
+}
+
+function readIfPresent(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
 export const codexCli: CodexRunner = ({ cwd, prompt, schemaPath, outputPath }) => {
+  const home = process.env.CODEX_HOME?.trim() || join(process.env.HOME ?? '', '.codex');
+  const scope = reviewScope([readIfPresent(join(home, 'config.toml')), readIfPresent(join(cwd, '.codex', 'config.toml'))]);
   const result = Bun.spawnSync(
     [
       codexExecutable(),
       'exec',
+      ...scope,
       '--sandbox',
       'read-only',
       '--cd',

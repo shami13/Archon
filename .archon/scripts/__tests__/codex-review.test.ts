@@ -13,6 +13,7 @@ import {
   CODEX_OUTPUT_SCHEMA,
   codexExecutable,
   observeCodexReview,
+  reviewScope,
   parseCodexOutput,
   type CodexObserveOptions,
   type CodexRunner,
@@ -296,5 +297,20 @@ describe('codexExecutable', () => {
     expect(codexExecutable('/opt/tools/codex-bin')).toBe('/opt/tools/codex-bin');
     const dir = mkdtempSync(join(tmpdir(), 'codex-pin-'));
     expect(codexExecutable(dir)).toBe(join(dir, process.platform === 'win32' ? 'codex.exe' : 'codex'));
+  });
+});
+
+describe('reviewScope', () => {
+  it('turns plugins, apps and every configured MCP server off', () => {
+    const user = 'model = "x"\n[mcp_servers.docs]\nurl = "https://d"\n[mcp_servers."kindly-web-search"]\nurl = "http://k"\n';
+    const project = '[mcp_servers.lad]\nurl = "http://l"\n';
+    expect(reviewScope([user, project])).toEqual([
+      '-c', 'features.plugins=false',
+      '-c', 'features.apps=false',
+      '-c', 'mcp_servers."docs".enabled=false',
+      '-c', 'mcp_servers."kindly-web-search".enabled=false',
+      '-c', 'mcp_servers."lad".enabled=false',
+    ]);
+    expect(reviewScope([''])).toEqual(['-c', 'features.plugins=false', '-c', 'features.apps=false']);
   });
 });

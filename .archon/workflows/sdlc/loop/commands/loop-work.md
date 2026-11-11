@@ -47,5 +47,5 @@ If the move turns out to be wrong (the pull request was already merged, the issu
 Finish with these lines, each on its own, so the loop can review and push your commit:
 
 `BRANCH: <the branch your commit is on>`
-`COMMIT: <its full SHA>`
+`COMMIT: <its full SHA>`, or `COMMIT: none` when you committed nothing
 `PR: <full pull request URL>` for a continued pull request, or `PR: none` followed by one sentence saying why (also when the move turned out to be wrong and you committed nothing).

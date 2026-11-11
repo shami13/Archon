@@ -58,13 +58,14 @@ export function repoOfOrigin(remote: string): QualifiedPr['repo'] {
     try {
       url = new URL(value);
     } catch {
-      throw new Error(`origin ${value} is not a repository URL this loop can publish to`);
+      throw new Error('origin is not a repository URL this loop can publish to');
     }
     host = url.hostname;
     path = url.pathname.replace(/^\/+/, '');
   }
   path = path.replace(/\/+$/, '').replace(/\.git$/, '');
-  if (host === '' || !/^[^/]+\/[^/]+$/.test(path)) throw new Error(`origin ${value} is not a repository URL this loop can publish to`);
+  // The URL stays out of the message: a remote may carry a credential.
+  if (host === '' || !/^[^/]+\/[^/]+$/.test(path)) throw new Error('origin is not a repository URL this loop can publish to');
   return { host: host.toLowerCase(), path };
 }
 

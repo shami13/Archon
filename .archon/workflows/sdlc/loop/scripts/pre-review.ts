@@ -14,7 +14,7 @@
  */
 import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { reportLine } from '../../.shared/builder-report.ts';
+import { rawLine, reportLine } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
 import { pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource } from '../../.shared/forge.ts';
@@ -57,8 +57,12 @@ function review(): void {
   const head = git(['rev-parse', 'HEAD']);
   // Codex reads the working tree; it must be the commit that gets pushed, nothing more and nothing less.
   if (git(['status', '--porcelain']) !== '') throw new Error('the checkout has uncommitted or untracked changes; commit or remove them before the review');
-  // A builder that committed nothing (the move was wrong, or a decision is the owner's) reports no COMMIT.
+  // The builder's report says what it committed, or `COMMIT: none` when the move was wrong or a decision is the
+  // owner's; a report without a readable COMMIT line is a report this gate cannot act on.
+  const written = rawLine(builder, 'COMMIT');
+  if (written === undefined) throw new Error("the builder's report has no COMMIT line; nothing is reviewed or pushed");
   const committed = reportLine(builder, 'COMMIT');
+  if (committed !== undefined && !/^[0-9a-f]{7,40}$/i.test(committed)) throw new Error(`the builder's COMMIT line (${committed}) is not a commit SHA`);
   if (committed === undefined) {
     emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder committed nothing; nothing to review or push', round });
     return;

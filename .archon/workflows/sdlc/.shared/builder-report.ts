@@ -106,28 +106,24 @@ export function canonicalRepoOfOrigin(remote: string): { host: string; path: str
   const repo = repoOfOrigin(remote);
   if (/^https?:\/\//.test(remote.trim())) return repo;
   // Git's own ssh command, so an alias or option it carries (-o HostName=...) counts here as it does for the push.
-  const probe = Bun.spawnSync(['sh', '-c', 'exec "$0" "$@"', ...gitSshCommand(), ...sshProbeArgs(remote, repo.host)], { stdout: 'pipe', stderr: 'ignore' });
+  const probe = Bun.spawnSync(['sh', '-c', `${gitSshCommand()} "$@"`, 'sh', ...sshProbeArgs(remote, repo.host)], { stdout: 'pipe', stderr: 'ignore' });
   const hostname = /^hostname (\S+)$/m.exec(probe.stdout.toString())?.[1];
   return hostname === undefined || probe.exitCode !== 0 ? repo : { host: forgeHost(hostname), path: repo.path };
 }
 
 /**
- * The command Git connects with, as argv words for `sh -c`: GIT_SSH_COMMAND, else core.sshCommand,
- * else GIT_SSH, else plain ssh. The first two are shell text, so they are expanded by a shell word
- * split; the legacy GIT_SSH is one program path.
+ * The command Git connects with, as the shell text Git itself runs: GIT_SSH_COMMAND, else
+ * core.sshCommand, else GIT_SSH (one program path, quoted), else plain ssh. Shell text keeps
+ * its semantics, such as a leading environment assignment, because a shell runs it.
  */
-export function gitSshCommand(env: NodeJS.ProcessEnv = process.env): string[] {
-  const shell = (text: string): string[] => {
-    const words = Bun.spawnSync(['sh', '-c', `for w in ${text}; do printf '%s\\0' "$w"; done`], { stdout: 'pipe', stderr: 'ignore' });
-    return words.stdout.toString().split('\0').filter(word => word !== '');
-  };
+export function gitSshCommand(env: NodeJS.ProcessEnv = process.env): string {
   const command = env.GIT_SSH_COMMAND?.trim();
-  if (command) return shell(command);
+  if (command) return command;
   const configured = Bun.spawnSync(['git', 'config', '--get', 'core.sshCommand'], { stdout: 'pipe', stderr: 'ignore' });
   const value = configured.stdout.toString().trim();
-  if (configured.exitCode === 0 && value !== '') return shell(value);
+  if (configured.exitCode === 0 && value !== '') return value;
   const legacy = env.GIT_SSH?.trim();
-  return legacy ? [legacy] : ['ssh'];
+  return legacy ? `'${legacy.replace(/'/g, "'\\''")}'` : 'ssh';
 }
 
 /**

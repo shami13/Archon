@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { canonicalRepoOfOrigin, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
-import { forgeSource, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
+import { forgeSource, sameRepo, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
 import { artifactsDir, emit, refuse, runId, stateDir, trimmed } from '../../.shared/io.ts';
 import { createPr, editPrBody, findOpenPrByHead, markPrReady, upsertComment, viewPr } from '../../.shared/pr.ts';
 
@@ -57,6 +57,13 @@ export function reviewSection(review: CodexReview): string {
     lines.push('', `- [${finding.priority}] ${finding.title} (${finding.path}${finding.line === null ? '' : `:${String(finding.line)}`}): ${finding.problem} Fix: ${finding.fix}`);
   }
   return lines.join('\n');
+}
+
+/** Whether two pull request URLs name the same pull request, whatever their spelling (a trailing slash, letter case). */
+export function samePullRequest(left: string, right: string): boolean {
+  const a = pullRefOf(left);
+  const b = pullRefOf(right);
+  return sameRepo(a.repo, b.repo) && a.number === b.number;
 }
 
 /**
@@ -113,7 +120,7 @@ function publish(): void {
       return;
     }
     // The writes go to the pull request this move continues, never to one the report happens to name.
-    if (kept !== upstream) throw new Error(`the builder reports ${kept}, but this move continues ${upstream}; nothing is written`);
+    if (!samePullRequest(kept, upstream)) throw new Error(`the builder reports ${kept}, but this move continues ${upstream}; nothing is written`);
     const ref = pullRefOf(kept);
     const current = viewPr(ref, source);
     if (current.pr.state !== 'open') {
@@ -155,7 +162,7 @@ function publish(): void {
   }
   // An earlier attempt of this node may have opened the pull request already; find it by its branch.
   const reported = reportLine(builder, 'PR');
-  if (upstream !== '' && reported !== undefined && reported !== upstream) {
+  if (upstream !== '' && reported !== undefined && !samePullRequest(reported, upstream)) {
     throw new Error(`the builder reports ${reported}, but this move continues ${upstream}; nothing is pushed`);
   }
   // A pull request this node created in an earlier attempt is remembered here, open or not; the open-PR lookup

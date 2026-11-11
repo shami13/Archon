@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
 import { canonicalRepoOfOrigin, gitSshCommand, repoOfOrigin, sshProbeArgs } from '../../workflows/sdlc/.shared/builder-report';
-import { abandonedContinuation, refuseBaseBranch, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
+import { abandonedContinuation, refuseBaseBranch, reviewSection, samePullRequest } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
 
@@ -79,22 +79,30 @@ describe('sshProbeArgs', () => {
 });
 
 describe('gitSshCommand', () => {
-  it('prefers GIT_SSH_COMMAND, then GIT_SSH, then ssh, splitting shell text into words', () => {
-    expect(gitSshCommand({ GIT_SSH_COMMAND: 'ssh -o "HostName=github.com"', GIT_SSH: '/x/ssh' })).toEqual(['ssh', '-o', 'HostName=github.com']);
-    expect(gitSshCommand({ GIT_SSH: '/x/ssh' })).toEqual(['/x/ssh']);
-    expect(gitSshCommand({})).toEqual(['ssh']);
+  it('prefers GIT_SSH_COMMAND as shell text, then GIT_SSH as one quoted path, then ssh', () => {
+    expect(gitSshCommand({ GIT_SSH_COMMAND: 'SSH_AUTH_SOCK=/a ssh -o "HostName=github.com"', GIT_SSH: '/x/ssh' })).toBe('SSH_AUTH_SOCK=/a ssh -o "HostName=github.com"');
+    expect(gitSshCommand({ GIT_SSH: "/x/it's ssh" })).toBe("'/x/it'\\''s ssh'");
+    expect(gitSshCommand({})).toBe('ssh');
   });
 });
 
 describe('canonicalRepoOfOrigin', () => {
-  it('resolves an alias through the ssh command Git itself would run', () => {
+  it('resolves an alias through the ssh command Git itself would run, environment assignment included', () => {
     const before = process.env.GIT_SSH_COMMAND;
-    process.env.GIT_SSH_COMMAND = 'ssh -o HostName=github.com';
+    process.env.GIT_SSH_COMMAND = 'SSH_AUTH_SOCK=/nonexistent/agent.sock ssh -o HostName=github.com';
     try {
       expect(canonicalRepoOfOrigin('git@review-work-alias:example/repo.git')).toEqual({ host: 'github.com', path: 'example/repo' });
     } finally {
       if (before === undefined) delete process.env.GIT_SSH_COMMAND;
       else process.env.GIT_SSH_COMMAND = before;
     }
+  });
+});
+
+describe('samePullRequest', () => {
+  it('matches two spellings of one pull request and tells another apart', () => {
+    expect(samePullRequest('https://github.com/Example/Repo/pull/7/', 'https://github.com/example/repo/pull/7')).toBe(true);
+    expect(samePullRequest('https://github.com/example/repo/pull/7', 'https://github.com/example/repo/pull/8')).toBe(false);
+    expect(samePullRequest('https://github.com/example/repo/pull/7', 'https://github.com/example/other/pull/7')).toBe(false);
   });
 });

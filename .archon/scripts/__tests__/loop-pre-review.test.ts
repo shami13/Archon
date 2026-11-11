@@ -4,7 +4,6 @@ import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
 import { reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
-const LATER = 'b'.repeat(40);
 
 function finding(priority: string, title: string): CodexFinding {
   return { priority, title, path: 'src/app.ts', line: 12, problem: 'it is wrong', failure: 'a caller fails', fix: 'check it', confidence: 'high' } as CodexFinding;
@@ -26,19 +25,14 @@ describe('summaryLine', () => {
 });
 
 describe('reviewSection', () => {
-  it('is the summary line for a clean review of the pushed head', () => {
-    expect(reviewSection(HEAD, review(HEAD, []))).toBe('Codex pre-push review of aaaaaaa: approve, 0 advisory note(s). Looked at it.');
+  it('is the summary line for a clean review', () => {
+    expect(reviewSection(review(HEAD, []))).toBe('Codex pre-push review of aaaaaaa: approve, 0 advisory note(s). Looked at it.');
   });
 
-  it('lists the blocking findings and says when the pushed head came after the review', () => {
-    const section = reviewSection(LATER, review(HEAD, [finding('P2', 'edge'), finding('P3', 'nit')]));
+  it('lists the blocking findings and leaves the advisory ones to the stored review', () => {
+    const section = reviewSection(review(HEAD, [finding('P2', 'edge'), finding('P3', 'nit')]));
     expect(section).toContain('1 blocking finding(s), 1 advisory note(s)');
-    expect(section).toContain('The pushed commit bbbbbbb came after that review');
     expect(section).toContain('- [P2] edge (src/app.ts:12): it is wrong Fix: check it');
     expect(section).not.toContain('nit');
-  });
-
-  it('says so when no review was recorded', () => {
-    expect(reviewSection(HEAD, undefined)).toBe('No Codex pre-push review of aaaaaaa was recorded.');
   });
 });

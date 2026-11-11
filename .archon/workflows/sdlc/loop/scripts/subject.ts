@@ -14,7 +14,16 @@ import { closes } from '../../.shared/workable.ts';
 const started = String(Date.now());
 const target = trimmed(process.env.INPUTS_TARGET);
 const chosen = trimmed(process.env.INPUTS_PR);
-const reports = `${trimmed(process.env.INPUTS_PUBLISH)}\n${trimmed(process.env.INPUTS_BUILDER)}\n${trimmed(process.env.INPUTS_SHIP)}`;
+const reports = `${trimmed(process.env.INPUTS_BUILDER)}\n${trimmed(process.env.INPUTS_SHIP)}`;
+/** The pull request the publish step reports, before any URL the builder's prose names. */
+function published(): string {
+  try {
+    const value = JSON.parse(trimmed(process.env.INPUTS_PUBLISH) || '{}') as { pr?: unknown };
+    return typeof value.pr === 'string' ? value.pr : '';
+  } catch {
+    return '';
+  }
+}
 
 function gh(args: string[]): unknown {
   const result = Bun.spawnSync(['gh', ...args], { stdout: 'pipe', stderr: 'pipe' });
@@ -24,6 +33,8 @@ function gh(args: string[]): unknown {
 
 function findPr(): string {
   if (chosen !== '') return chosen;
+  const fromPublish = published();
+  if (fromPublish !== '') return fromPublish;
   const named = [...reports.matchAll(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g)].map(m => m[0]);
   if (named.length > 0) return named[named.length - 1];
   const issue = /\/issues\/(\d+)\/?$/.exec(target)?.[1];

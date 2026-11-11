@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { rawLine, reportLine, repoOfOrigin, withCodexReviewSection } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
@@ -118,10 +118,10 @@ function publish(): void {
     throw new Error(`HEAD is ${head.slice(0, 7)} but the clean review read ${review.head.slice(0, 7)}; nothing is pushed until it is reviewed again`);
   }
 
-  const repo = repoOfOrigin(git(['remote', 'get-url', 'origin']));
+  const repo = canonicalRepoOfOrigin(git(['remote', 'get-url', 'origin']));
   // origin may push somewhere else than it fetches from; every push destination must be this same repository.
   for (const pushUrl of git(['remote', 'get-url', '--push', '--all', 'origin']).split('\n')) {
-    const destination = repoOfOrigin(pushUrl);
+    const destination = canonicalRepoOfOrigin(pushUrl);
     if (destination.host !== repo.host || destination.path.toLowerCase() !== repo.path.toLowerCase()) {
       throw new Error(`origin pushes to ${destination.path}, not to ${repo.path}; nothing is pushed`);
     }

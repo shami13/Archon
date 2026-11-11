@@ -81,3 +81,15 @@ export function repoOfOrigin(remote: string): { host: string; path: string } {
   if (host === '' || !/^[^/]+\/[^/]+$/.test(path)) throw new Error('origin is not a repository URL this loop can publish to');
   return { host: host.toLowerCase(), path };
 }
+
+/**
+ * The repository origin points at with its SSH host alias resolved: `git@github-work:o/r` reaches
+ * github.com when ~/.ssh/config says so, and the forge is asked about github.com, never about the alias.
+ */
+export function canonicalRepoOfOrigin(remote: string): { host: string; path: string } {
+  const repo = repoOfOrigin(remote);
+  if (/^https?:\/\//.test(remote.trim())) return repo;
+  const probe = Bun.spawnSync(['ssh', '-G', repo.host], { stdout: 'pipe', stderr: 'ignore' });
+  const hostname = /^hostname (\S+)$/m.exec(probe.stdout.toString())?.[1];
+  return hostname === undefined || probe.exitCode !== 0 ? repo : { host: hostname.toLowerCase(), path: repo.path };
+}

@@ -14,7 +14,7 @@
  */
 import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { rawLine, reportLine, repoOfOrigin } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, rawLine, reportLine } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
 import { pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource } from '../../.shared/forge.ts';
@@ -76,7 +76,7 @@ function review(): void {
   let base = defaultBranch();
   if (pr !== '') {
     const existing = viewPr(pullRefOf(pr), forgeSource()).pr;
-    const origin = repoOfOrigin(git(['remote', 'get-url', 'origin']));
+    const origin = canonicalRepoOfOrigin(git(['remote', 'get-url', 'origin']));
     if (existing.repo.host.toLowerCase() !== origin.host || existing.repo.path.toLowerCase() !== origin.path.toLowerCase()) {
       throw new Error(`${pr} merges into ${existing.repo.path}, but origin is ${origin.path}; this loop reviews against origin only`);
     }

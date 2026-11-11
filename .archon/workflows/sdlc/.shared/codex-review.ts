@@ -89,7 +89,8 @@ export type CodexRunner = (request: {
 export const codexCli: CodexRunner = ({ cwd, prompt, schemaPath, outputPath }) => {
   const result = Bun.spawnSync(
     [
-      'codex',
+      // The executable the Codex provider is configured with, when the host names one; else PATH.
+      process.env.CODEX_BIN_PATH?.trim() || 'codex',
       'exec',
       '--sandbox',
       'read-only',

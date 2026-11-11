@@ -34,10 +34,17 @@ export function withCodexReviewSection(body: string, section: string): string {
   const lines = body.split('\n');
   // Headings on lines of their own, outside fenced code; a mention in prose or an example in a fence is neither.
   const headings: number[] = [];
-  let fenced = false;
+  // A fence closes only with the same character, at least as long; a shorter or different run is content.
+  let fence: { char: string; length: number } | undefined;
   lines.forEach((line, index) => {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    else if (!fenced && line.startsWith('## ')) headings.push(index);
+    const run = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (run !== undefined) {
+      const char = run.charAt(0);
+      if (fence === undefined) fence = { char, length: run.length };
+      else if (fence.char === char && run.length >= fence.length) fence = undefined;
+      return;
+    }
+    if (fence === undefined && line.startsWith('## ')) headings.push(index);
   });
   const start = headings.find(index => lines[index]?.trimEnd() === CODEX_REVIEW_HEADING);
   if (start === undefined) return `${body.replace(/\s+$/, '')}\n\n${block}`;

@@ -48,6 +48,11 @@ describe('withCodexReviewSection', () => {
     expect(withCodexReviewSection(body, 'new')).toBe(`${body}\n## Codex review\n\nnew\n`);
   });
 
+  it('keeps the real sections after a nested fenced example that names the heading', () => {
+    const body = 'Intro\n\n````markdown\n```\n## Codex review\n\nexample\n```\n````\n\n## Evidence\n\n- C1: ok\n\n## Rollout\n\nSlowly.\n';
+    expect(withCodexReviewSection(body, 'new')).toBe(`${body}\n## Codex review\n\nnew\n`);
+  });
+
   it('replaces a trailing section', () => {
     expect(withCodexReviewSection('Body\n\n## Codex review\n\nold\n', 'new')).toBe('Body\n\n## Codex review\n\nnew\n');
   });

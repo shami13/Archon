@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalRepoOfOrigin, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
@@ -81,10 +81,14 @@ function publish(): void {
     emit({ pr: '', head, published: 'false', reason: `HEAD is ${head.slice(0, 7)} but the last review read ${review.head.slice(0, 7)}` });
     return;
   }
-  if (review === undefined && !/^none\b/i.test(rawLine(builder, 'COMMIT') ?? '')) {
-    // Without an explicit `COMMIT: none` the gate did not finish: nothing is pushed, edited or marked ready.
-    emit({ pr: '', head, published: 'false', reason: `the gate recorded no review of ${head.slice(0, 7)} and the builder did not report COMMIT: none` });
-    return;
+  if (review === undefined) {
+    // The gate records the no-commit path it completed, for the HEAD it saw; anything else is a gate that did not finish.
+    const none = readIf(join(artifactsDir(), 'pre-review', 'none.json'));
+    const completedFor = none === undefined ? undefined : (JSON.parse(none) as { head?: unknown }).head;
+    if (completedFor !== head) {
+      emit({ pr: '', head, published: 'false', reason: `the gate recorded neither a review nor a completed no-commit result for ${head.slice(0, 7)}` });
+      return;
+    }
   }
   if (review === undefined) {
     // The gate reviewed nothing because the builder committed nothing. A move it gave up (PR: none) changes

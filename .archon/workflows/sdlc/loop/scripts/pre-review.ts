@@ -2,7 +2,7 @@
  * Codex reads the builder's commit before it leaves the checkout.
  *
  * The loop pushes nothing until this review has no blocking finding (or the correction
- * rounds are spent, in which case publish carries the findings into the pull request).
+ * rounds still block, in which case the gate fails and nothing is pushed).
  * The review is of the commits the branch adds on top of the default branch, in the run's
  * own checkout, and is kept in this run's artifacts; publish stores it beside the pull
  * request's ledger once the pull request exists, so the gate after the push reuses it
@@ -12,7 +12,7 @@
  * - INPUTS_BUILDER: the builder's report; its `BRANCH:` line names the branch to review.
  * - INPUTS_PR: the pull request URL when the move continues one; empty for a new issue.
  */
-import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalRepoOfOrigin, rawLine, reportLine } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
@@ -52,8 +52,6 @@ function review(): void {
   if (current !== branch) throw new Error(`the checkout is on ${current}, not on the builder's branch ${branch}`);
   const dir = join(artifactsDir(), 'pre-review');
   mkdirSync(dir, { recursive: true });
-  // Which review this is in this run: one file per reviewed head is already there for each earlier round.
-  const round = String(readdirSync(dir).filter(name => name.endsWith('.json') && name !== 'latest.json').length + 1);
   const head = git(['rev-parse', 'HEAD']);
   // Codex reads the working tree; it must be the commit that gets pushed, nothing more and nothing less.
   // --untracked-files=all: a status.showUntrackedFiles=no in some config would otherwise hide a file the commit lacks.
@@ -65,7 +63,9 @@ function review(): void {
   const committed = reportLine(builder, 'COMMIT');
   if (committed !== undefined && !/^[0-9a-f]{7,40}$/i.test(committed)) throw new Error(`the builder's COMMIT line (${committed}) is not a commit SHA`);
   if (committed === undefined) {
-    emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder committed nothing; nothing to review or push', round });
+    // publish reads this record: a no-commit path the gate completed, for this HEAD, not a gate that failed.
+    writeFileSync(join(dir, 'none.json'), `${JSON.stringify({ head })}\n`);
+    emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder committed nothing; nothing to review or push' });
     return;
   }
   // A correction round commits on top of the builder's commit, so HEAD is that commit or a descendant of it.
@@ -84,7 +84,8 @@ function review(): void {
   }
   fetchBase(process.cwd(), base);
   if (git(['rev-list', '--count', `origin/${base}..HEAD`]) === '0') {
-    emit({ head, clean: 'true', blocking: 0, review: '', summary: `no commits beyond origin/${base}; nothing to review`, round });
+    writeFileSync(join(dir, 'none.json'), `${JSON.stringify({ head })}\n`);
+    emit({ head, clean: 'true', blocking: 0, review: '', summary: `no commits beyond origin/${base}; nothing to review` });
     return;
   }
   const result = runCodexReview(head, {
@@ -107,7 +108,6 @@ function review(): void {
     blocking,
     review: path,
     summary: summaryLine(head, result.findings, result.assessment),
-    round,
   });
 }
 

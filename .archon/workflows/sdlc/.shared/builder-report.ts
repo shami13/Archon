@@ -52,6 +52,8 @@ export function withCodexReviewSection(body: string, section: string): string {
     }
     // A level-one or level-two heading, indented up to three spaces as Markdown allows, ends a section.
     if (/^ {0,3}#{1,2} /.test(line)) headings.push(index);
+    // A Setext heading: a text line underlined with = or - on the next line.
+    else if (line.trim() !== '' && !/^ {0,3}(?:[-*+]|\d+[.)]) /.test(line) && /^ {0,3}(?:=+|-+)[ \t]*$/.test(lines[index + 1] ?? '')) headings.push(index);
   });
   const start = headings.find(index => lines[index]?.trim() === CODEX_REVIEW_HEADING);
   if (start === undefined) return `${text.replace(/\s+$/, '')}\n\n${block}`;

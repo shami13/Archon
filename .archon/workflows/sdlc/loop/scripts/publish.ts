@@ -175,6 +175,11 @@ function publish(): void {
   } else {
     const ref = pullRefOf(url);
     const current = viewPr(ref, source);
+    // Read again after the push: a pull request closed meanwhile gets no body, comment or ready state.
+    if (current.pr.state !== 'open') {
+      emit({ pr: '', head, published: 'false', reason: `${url} is ${current.pr.state}; the pushed commit was not published to it` });
+      return;
+    }
     // The builder writes the whole new body; the current one stands when it wrote none.
     writeFileSync(bodyPath, withCodexReviewSection(readIf(join(files, 'body.md')) ?? current.body, section));
     editPrBody(ref, bodyPath, source);

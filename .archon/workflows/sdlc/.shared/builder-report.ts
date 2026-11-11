@@ -49,7 +49,17 @@ export function withCodexReviewSection(body: string, section: string): string {
   const headings: number[] = [];
   // A fence closes only with the same character, at least as long; a shorter or different run is content.
   let fence: { char: string; length: number } | undefined;
+  // An HTML comment block hides its lines too: a template's commented example of the heading is not the section.
+  let comment = false;
   lines.forEach((line, index) => {
+    if (comment) {
+      if (line.includes('-->')) comment = false;
+      return;
+    }
+    if (fence === undefined && /^ {0,3}<!--/.test(line)) {
+      if (!line.includes('-->')) comment = true;
+      return;
+    }
     const run = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (run !== null && fence === undefined) {
       fence = { char: run[1]?.charAt(0) ?? '', length: run[1]?.length ?? 0 };
@@ -145,7 +155,8 @@ export function probeShell(env: NodeJS.ProcessEnv = process.env, platform: strin
 export function gitSshCommand(env: NodeJS.ProcessEnv = process.env): string {
   const command = env.GIT_SSH_COMMAND?.trim();
   if (command) return command;
-  const configured = Bun.spawnSync(['git', 'config', '--get', 'core.sshCommand'], { stdout: 'pipe', stderr: 'ignore' });
+  // The given environment, so GIT_DIR and GIT_CONFIG_* select the configuration as they do for Git itself.
+  const configured = Bun.spawnSync(['git', 'config', '--get', 'core.sshCommand'], { env: { ...env, PATH: env.PATH ?? process.env.PATH ?? '' }, stdout: 'pipe', stderr: 'ignore' });
   const value = configured.stdout.toString().trim();
   if (configured.exitCode === 0 && value !== '') return value;
   const legacy = env.GIT_SSH?.trim();

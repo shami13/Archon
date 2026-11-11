@@ -11,6 +11,7 @@
  * Bound inputs (`with:` bindings, canonical text in env):
  * - INPUTS_BUILDER: the builder's report; its `BRANCH:` line names the branch to review.
  * - INPUTS_PR: the pull request URL when the move continues one; empty for a new issue.
+ * - INPUTS_TARGET: the work item URL, so the review of a new branch can read what it must deliver.
  */
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -47,6 +48,7 @@ export function summaryLine(head: string, findings: readonly CodexFinding[], ass
 function review(): void {
   const builder = trimmed(process.env.INPUTS_BUILDER);
   const pr = trimmed(process.env.INPUTS_PR);
+  const target = trimmed(process.env.INPUTS_TARGET);
   const branch = reportLine(builder, 'BRANCH') ?? git(['rev-parse', '--abbrev-ref', 'HEAD']);
   const current = git(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (current !== branch) throw new Error(`the checkout is on ${current}, not on the builder's branch ${branch}`);
@@ -90,7 +92,7 @@ function review(): void {
   }
   const result = runCodexReview(head, {
     cwd: process.cwd(),
-    url: pr === '' ? `branch ${branch} (no pull request yet)` : pr,
+    url: `${pr === '' ? `branch ${branch} (no pull request yet; it will close ${target || 'the work item named in the proposed description'})` : pr}; the proposed pull request description is the file ${join(artifactsDir(), 'pull-request', 'body.md')}`,
     base,
     history: [],
     runner: codexCli,

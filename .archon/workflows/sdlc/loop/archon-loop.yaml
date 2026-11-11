@@ -144,6 +144,7 @@ nodes:
           with:
             builder: "$build.output"
             pr: "$pick.output.pr"
+            target: "$pick.output.target"
           output_format:
             type: object
             properties:

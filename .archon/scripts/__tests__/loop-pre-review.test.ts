@@ -81,8 +81,10 @@ describe('sshProbeArgs', () => {
 describe('gitSshCommand', () => {
   it('prefers GIT_SSH_COMMAND as shell text, then GIT_SSH as one quoted path, then ssh', () => {
     expect(gitSshCommand({ GIT_SSH_COMMAND: 'SSH_AUTH_SOCK=/a ssh -o "HostName=github.com"', GIT_SSH: '/x/ssh' })).toBe('SSH_AUTH_SOCK=/a ssh -o "HostName=github.com"');
-    expect(gitSshCommand({ GIT_SSH: "/x/it's ssh" })).toBe("'/x/it'\\''s ssh'");
-    expect(gitSshCommand({})).toBe('ssh');
+    // No repository and no global or system config: the developer's own core.sshCommand must not decide this test.
+    const bare = { GIT_DIR: '/nonexistent/.git', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+    expect(gitSshCommand({ ...bare, GIT_SSH: "/x/it's ssh" })).toBe("'/x/it'\\''s ssh'");
+    expect(gitSshCommand(bare)).toBe('ssh');
   });
 });
 

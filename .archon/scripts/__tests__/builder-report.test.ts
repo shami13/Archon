@@ -30,6 +30,11 @@ describe('reportLine', () => {
 });
 
 describe('withCodexReviewSection', () => {
+  it('leaves a commented example of the heading alone and keeps the comment closed', () => {
+    const body = '<!-- Template instructions:\n## Codex review\nExample only.\n-->\n\n## Evidence\n\n- C1: ok\n';
+    expect(withCodexReviewSection(body, 'Codex: approve')).toBe(`${body}\n## Codex review\n\nCodex: approve\n`);
+  });
+
   it('appends the section to a body without one', () => {
     expect(withCodexReviewSection('Closes #5\n\n## Evidence\n\n- C1: ok\n', 'Codex: approve')).toBe(
       'Closes #5\n\n## Evidence\n\n- C1: ok\n\n## Codex review\n\nCodex: approve\n'

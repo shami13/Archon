@@ -15,7 +15,7 @@
  * and the first stored review wins for both.
  */
 
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { Ledger, Observation, ReviewComment } from './external-review.ts';
@@ -86,11 +86,21 @@ export type CodexRunner = (request: {
   readonly outputPath: string;
 }) => { readonly exitCode: number; readonly stderr: string };
 
+/** The Codex executable: CODEX_BIN_PATH as the provider reads it (an executable, or the directory holding one), else PATH. */
+export function codexExecutable(pin: string | undefined = process.env.CODEX_BIN_PATH): string {
+  const value = pin?.trim();
+  if (value === undefined || value === '') return 'codex';
+  try {
+    return statSync(value).isDirectory() ? join(value, process.platform === 'win32' ? 'codex.exe' : 'codex') : value;
+  } catch {
+    return value;
+  }
+}
+
 export const codexCli: CodexRunner = ({ cwd, prompt, schemaPath, outputPath }) => {
   const result = Bun.spawnSync(
     [
-      // The executable the Codex provider is configured with, when the host names one; else PATH.
-      process.env.CODEX_BIN_PATH?.trim() || 'codex',
+      codexExecutable(),
       'exec',
       '--sandbox',
       'read-only',

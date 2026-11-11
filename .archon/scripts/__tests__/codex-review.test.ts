@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { trackTempRoots } from '@archon/paths/test-utils';
 import {
   CODEX_OUTPUT_SCHEMA,
+  codexExecutable,
   observeCodexReview,
   parseCodexOutput,
   type CodexObserveOptions,
@@ -283,5 +284,15 @@ describe('the external review node of the loop', () => {
     });
     expect(run.stderr).toBe('');
     expect(JSON.parse(run.stdout)).toMatchObject({ ran: 'false', blocking: 0, reason: expect.stringContaining('already passed') });
+  });
+});
+
+describe('codexExecutable', () => {
+  it('runs codex from PATH without a pin, the pinned file, or codex inside a pinned directory', () => {
+    expect(codexExecutable(undefined)).toBe('codex');
+    expect(codexExecutable('  ')).toBe('codex');
+    expect(codexExecutable('/opt/tools/codex-bin')).toBe('/opt/tools/codex-bin');
+    const dir = mkdtempSync(join(tmpdir(), 'codex-pin-'));
+    expect(codexExecutable(dir)).toBe(join(dir, 'codex'));
   });
 });

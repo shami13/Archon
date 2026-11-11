@@ -137,6 +137,13 @@ function publish(): void {
   }
 
   const repo = repoOfOrigin(git(['remote', 'get-url', 'origin']));
+  // origin may push somewhere else than it fetches from; every push destination must be this same repository.
+  for (const pushUrl of git(['remote', 'get-url', '--push', '--all', 'origin']).split('\n')) {
+    const destination = repoOfOrigin(pushUrl);
+    if (destination.host !== repo.host || destination.path.toLowerCase() !== repo.path.toLowerCase()) {
+      throw new Error(`origin pushes to ${destination.path}, not to ${repo.path}; nothing is pushed`);
+    }
+  }
   const section = reviewSection(review);
   const bodyPath = join(artifactsDir(), 'pull-request-body.md');
 

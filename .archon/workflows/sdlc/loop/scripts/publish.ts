@@ -63,19 +63,36 @@ function publish(): void {
   const reviewPath = join(artifactsDir(), 'pre-review', 'latest.json');
   const review = existsSync(reviewPath) ? (JSON.parse(readFileSync(reviewPath, 'utf8')) as CodexReview) : undefined;
   const upstream = trimmed(process.env.INPUTS_PR);
+  const files = join(artifactsDir(), 'pull-request');
+  const source = forgeSource();
   if (review === undefined) {
-    // The gate reviewed nothing: the builder committed nothing, so there is nothing to push, open or mark ready.
-    emit({ pr: upstream, head });
+    // The gate reviewed nothing because the builder committed nothing. A move it gave up (PR: none) changes
+    // nothing; a continued pull request that needed only its body, comment or ready state still gets those.
+    const kept = reportLine(builder, 'PR');
+    if (upstream === '' || kept === undefined) {
+      emit({ pr: upstream, head });
+      return;
+    }
+    const ref = pullRefOf(kept);
+    const current = viewPr(ref, source);
+    const body = readIf(join(files, 'body.md'));
+    if (body !== undefined && body !== current.body) {
+      const bodyPath = join(artifactsDir(), 'pull-request-body.md');
+      writeFileSync(bodyPath, body);
+      editPrBody(ref, bodyPath, source);
+    }
+    const comment = readIf(join(files, 'comment.md'));
+    if (comment !== undefined && comment.trim() !== '') gh(['pr', 'comment', kept, '--body-file', join(files, 'comment.md')]);
+    if (current.pr.is_draft) markPrReady(ref, source);
+    emit({ pr: kept, head });
     return;
   }
   if (review.head !== head) {
     throw new Error(`HEAD is ${head.slice(0, 7)} but the clean review read ${review.head.slice(0, 7)}; nothing is pushed until it is reviewed again`);
   }
 
-  const source = forgeSource();
   const repoView = JSON.parse(gh(['repo', 'view', '--json', 'nameWithOwner'])) as { nameWithOwner: string };
   const repo: QualifiedPr['repo'] = { host: 'github.com', path: repoView.nameWithOwner };
-  const files = join(artifactsDir(), 'pull-request');
   const section = reviewSection(review);
   const bodyPath = join(artifactsDir(), 'pull-request-body.md');
 

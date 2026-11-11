@@ -29,11 +29,12 @@ function git(args: string[]): string {
   return result.stdout.toString().trim();
 }
 
-/** The branch the repository merges into: what origin calls HEAD, or main when origin does not say. */
+/** The branch the repository merges into, as origin advertises it now; a cached origin/HEAD can be stale or absent. */
 function defaultBranch(): string {
-  const result = Bun.spawnSync(['git', 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { stdout: 'pipe', stderr: 'ignore' });
-  const ref = result.stdout.toString().trim();
-  return ref.startsWith('refs/remotes/origin/') ? ref.slice('refs/remotes/origin/'.length) : 'main';
+  const advertised = git(['ls-remote', '--symref', 'origin', 'HEAD']);
+  const name = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(advertised)?.[1];
+  if (name === undefined) throw new Error('origin advertises no default branch; cannot tell what the change merges into');
+  return name;
 }
 
 /** The one line a pull request body carries as the review's evidence. */

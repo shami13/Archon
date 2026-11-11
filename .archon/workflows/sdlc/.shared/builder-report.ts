@@ -32,7 +32,8 @@ export const CODEX_REVIEW_HEADING = '## Codex review';
 export function withCodexReviewSection(body: string, section: string): string {
   const block = `${CODEX_REVIEW_HEADING}\n\n${section.trim()}\n`;
   // Line endings are normalised first: a CRLF body would otherwise hide every fence behind its trailing \r.
-  const lines = body.replace(/\r\n/g, '\n').split('\n');
+  const text = body.replace(/\r\n/g, '\n');
+  const lines = text.split('\n');
   // Headings on lines of their own, outside fenced code; a mention in prose or an example in a fence is neither.
   const headings: number[] = [];
   // A fence closes only with the same character, at least as long; a shorter or different run is content.
@@ -53,7 +54,7 @@ export function withCodexReviewSection(body: string, section: string): string {
     if (/^ {0,3}#{1,2} /.test(line)) headings.push(index);
   });
   const start = headings.find(index => lines[index]?.trim() === CODEX_REVIEW_HEADING);
-  if (start === undefined) return `${body.replace(/\s+$/, '')}\n\n${block}`;
+  if (start === undefined) return `${text.replace(/\s+$/, '')}\n\n${block}`;
   const end = headings.find(index => index > start) ?? lines.length;
   const before = lines.slice(0, start).join('\n');
   const after = lines.slice(end).join('\n');

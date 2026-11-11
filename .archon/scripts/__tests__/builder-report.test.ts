@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { rawLine, reportLine, withCodexReviewSection } from '../../workflows/sdlc/.shared/builder-report';
+import { forgeHost, rawLine, reportLine, withCodexReviewSection } from '../../workflows/sdlc/.shared/builder-report';
 
 describe('reportLine', () => {
   it('reads the last KEY: value line of a report', () => {
@@ -58,7 +58,19 @@ describe('withCodexReviewSection', () => {
     expect(withCodexReviewSection(body, 'new')).toBe(`${body}\n## Codex review\n\nnew\n`);
   });
 
+  it('ends the section at a level-one heading too', () => {
+    const body = 'Closes #5\n\n## Codex review\n\nold\n\n# Release notes\n\nUser notes.\n';
+    expect(withCodexReviewSection(body, 'new')).toBe('Closes #5\n\n## Codex review\n\nnew\n\n# Release notes\n\nUser notes.\n');
+  });
+
   it('replaces a trailing section', () => {
     expect(withCodexReviewSection('Body\n\n## Codex review\n\nold\n', 'new')).toBe('Body\n\n## Codex review\n\nnew\n');
+  });
+});
+
+describe('forgeHost', () => {
+  it('maps GitHub SSH-over-443 to github.com and leaves other hosts as they are', () => {
+    expect(forgeHost('ssh.github.com')).toBe('github.com');
+    expect(forgeHost('GitHub.Company.Test')).toBe('github.company.test');
   });
 });

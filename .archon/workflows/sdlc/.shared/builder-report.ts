@@ -48,9 +48,10 @@ export function withCodexReviewSection(body: string, section: string): string {
       if (closes) fence = undefined;
       return;
     }
-    if (line.startsWith('## ')) headings.push(index);
+    // A level-one or level-two heading, indented up to three spaces as Markdown allows, ends a section.
+    if (/^ {0,3}#{1,2} /.test(line)) headings.push(index);
   });
-  const start = headings.find(index => lines[index]?.trimEnd() === CODEX_REVIEW_HEADING);
+  const start = headings.find(index => lines[index]?.trim() === CODEX_REVIEW_HEADING);
   if (start === undefined) return `${body.replace(/\s+$/, '')}\n\n${block}`;
   const end = headings.find(index => index > start) ?? lines.length;
   const before = lines.slice(0, start).join('\n');
@@ -91,5 +92,11 @@ export function canonicalRepoOfOrigin(remote: string): { host: string; path: str
   if (/^https?:\/\//.test(remote.trim())) return repo;
   const probe = Bun.spawnSync(['ssh', '-G', repo.host], { stdout: 'pipe', stderr: 'ignore' });
   const hostname = /^hostname (\S+)$/m.exec(probe.stdout.toString())?.[1];
-  return hostname === undefined || probe.exitCode !== 0 ? repo : { host: hostname.toLowerCase(), path: repo.path };
+  return hostname === undefined || probe.exitCode !== 0 ? repo : { host: forgeHost(hostname), path: repo.path };
+}
+
+/** The forge a transport host belongs to: GitHub's SSH-over-443 endpoint is github.com to the forge. */
+export function forgeHost(hostname: string): string {
+  const host = hostname.toLowerCase();
+  return host === 'ssh.github.com' ? 'github.com' : host;
 }

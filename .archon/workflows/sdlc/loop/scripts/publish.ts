@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
+import { rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
@@ -104,8 +104,9 @@ function publish(): void {
     emit({ pr: '', head, published: 'false', reason: `HEAD is ${head.slice(0, 7)} but the last review read ${review.head.slice(0, 7)}` });
     return;
   }
-  if (review === undefined && reportLine(builder, 'COMMIT') !== undefined) {
-    emit({ pr: '', head, published: 'false', reason: `no pre-push review of ${head.slice(0, 7)} was recorded` });
+  if (review === undefined && !/^none\b/i.test(rawLine(builder, 'COMMIT') ?? '')) {
+    // Without an explicit `COMMIT: none` the gate did not finish: nothing is pushed, edited or marked ready.
+    emit({ pr: '', head, published: 'false', reason: `the gate recorded no review of ${head.slice(0, 7)} and the builder did not report COMMIT: none` });
     return;
   }
   if (review === undefined) {
@@ -141,7 +142,7 @@ function publish(): void {
   let url = upstream || reportLine(builder, 'PR') || findOpenPrByHead(repo, repo, branch, source)?.pr.url || '';
   if (url !== '') {
     const existing = viewPr(pullRefOf(url), source).pr;
-    if (existing.head_repo !== null && existing.head_repo.path !== repo.path) {
+    if (existing.head_repo !== null && (existing.head_repo.host.toLowerCase() !== repo.host || existing.head_repo.path.toLowerCase() !== repo.path.toLowerCase())) {
       throw new Error(`${url} has its head in ${existing.head_repo.path}; this loop pushes to origin only`);
     }
     if (existing.head !== branch) throw new Error(`${url} has head ${existing.head}, not the builder's branch ${branch}`);

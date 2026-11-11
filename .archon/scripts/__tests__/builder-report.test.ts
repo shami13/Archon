@@ -23,6 +23,9 @@ describe('reportLine', () => {
   it('takes a pull request only as its URL', () => {
     expect(reportLine('PR: https://github.com/example/app/pull/9', 'PR')).toBe('https://github.com/example/app/pull/9');
     expect(reportLine('PR: the one I opened earlier', 'PR')).toBeUndefined();
+    expect(reportLine('PR: https://github.com/example/app/pull/9/', 'PR')).toBe('https://github.com/example/app/pull/9/');
+    expect(reportLine('PR: https://forge.example:8443/example/app/pull/9', 'PR')).toBe('https://forge.example:8443/example/app/pull/9');
+    expect(reportLine('PR: https://github.com/example/app/pull/9/files', 'PR')).toBeUndefined();
   });
 });
 

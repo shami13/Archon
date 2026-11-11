@@ -1,3 +1,5 @@
+import { pullRefOf } from './external-review.ts';
+
 /**
  * The few facts the loop reads out of the builder's free-text report, and the one
  * section it writes into a pull request body. The report stays prose for the reviewers;
@@ -12,7 +14,15 @@
 export function reportLine(report: string, key: 'BRANCH' | 'COMMIT' | 'PR'): string | undefined {
   const value = rawLine(report, key);
   if (value === undefined || /^none\b/i.test(value)) return undefined;
-  if (key === 'PR') return /^https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.exec(value)?.[0];
+  if (key === 'PR') {
+    // The same parser the forge uses, so a URL it accepts (a port, a trailing slash) is a pull request here too.
+    try {
+      pullRefOf(value);
+      return value;
+    } catch {
+      return undefined;
+    }
+  }
   return value;
 }
 

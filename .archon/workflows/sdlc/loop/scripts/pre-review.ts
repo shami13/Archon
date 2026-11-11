@@ -56,7 +56,8 @@ function review(): void {
   const round = String(readdirSync(dir).filter(name => name.endsWith('.json') && name !== 'latest.json').length + 1);
   const head = git(['rev-parse', 'HEAD']);
   // Codex reads the working tree; it must be the commit that gets pushed, nothing more and nothing less.
-  if (git(['status', '--porcelain']) !== '') throw new Error('the checkout has uncommitted or untracked changes; commit or remove them before the review');
+  // --untracked-files=all: a status.showUntrackedFiles=no in some config would otherwise hide a file the commit lacks.
+  if (git(['status', '--porcelain', '--untracked-files=all']) !== '') throw new Error('the checkout has uncommitted or untracked changes; commit or remove them before the review');
   // The builder's report says what it committed, or `COMMIT: none` when the move was wrong or a decision is the
   // owner's; a report without a readable COMMIT line is a report this gate cannot act on.
   const written = rawLine(builder, 'COMMIT');

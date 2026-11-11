@@ -86,7 +86,11 @@ export type CodexRunner = (request: {
   readonly outputPath: string;
 }) => { readonly exitCode: number; readonly stderr: string };
 
-/** The Codex executable: CODEX_BIN_PATH as the provider reads it (an executable, or the directory holding one), else PATH. */
+/**
+ * The Codex executable: CODEX_BIN_PATH as the provider reads it (an executable, or the directory holding one), else PATH.
+ * shortcut: the provider's other sources (assistants.codex.codexBinaryPath, the vendor directory) are not consulted here,
+ * upgrade when a host runs this gate with Codex configured there and absent from PATH and CODEX_BIN_PATH.
+ */
 export function codexExecutable(pin: string | undefined = process.env.CODEX_BIN_PATH): string {
   const value = pin?.trim();
   if (value === undefined || value === '') return 'codex';

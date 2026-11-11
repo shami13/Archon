@@ -21,6 +21,8 @@ import { Ledger, findingsOf } from '../../workflows/sdlc/.shared/external-review
 import type { QualifiedPr } from '../../workflows/sdlc/.shared/forge';
 import { runPackScript } from './deliver-checks-harness';
 
+// The scripted Codex of these tests is found through PATH; a developer's own pin must not take its place.
+process.env.CODEX_BIN_PATH = '';
 const trackTempRoot = trackTempRoots();
 const REF: QualifiedPr = { repo: { host: 'github.com', path: 'example/repo' }, number: 7 };
 const URL = 'https://github.com/example/repo/pull/7';

@@ -34,6 +34,8 @@ import {
 import type { QualifiedPr } from '../../workflows/sdlc/.shared/forge';
 import { PR_URL, runDeliverScript, runPackScript, type ScriptRun } from './deliver-checks-harness';
 
+// The scripted Codex of these tests is found through PATH; a developer's own pin must not take its place.
+process.env.CODEX_BIN_PATH = '';
 const trackTempRoot = trackTempRoots();
 /** Commits made here and by the land script read no user or system git config. */
 const GIT_ISOLATION = {

@@ -59,6 +59,11 @@ export function reviewSection(review: CodexReview): string {
   return lines.join('\n');
 }
 
+/** A builder that committed on the base itself has no branch to open a pull request from; a push would advance the base. */
+export function refuseBaseBranch(branch: string, base: string): void {
+  if (branch === base) throw new Error(`the builder's branch is ${branch}, the base itself; nothing is pushed`);
+}
+
 function publish(): void {
   const builder = trimmed(process.env.INPUTS_BUILDER);
   const target = trimmed(process.env.INPUTS_TARGET);
@@ -121,6 +126,8 @@ function publish(): void {
   if (review.head !== head) {
     throw new Error(`HEAD is ${head.slice(0, 7)} but the clean review read ${review.head.slice(0, 7)}; nothing is pushed until it is reviewed again`);
   }
+
+  refuseBaseBranch(branch, review.base);
 
   const repo = canonicalRepoOfOrigin(git(['remote', 'get-url', 'origin']));
   // origin may push somewhere else than it fetches from; every push destination must be this same repository.

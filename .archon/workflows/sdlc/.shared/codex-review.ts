@@ -101,39 +101,44 @@ export function codexExecutable(pin: string | undefined = process.env.CODEX_BIN_
   }
 }
 
+/** The names in a `codex mcp list --json` listing: every server Codex resolves, enabled or not. */
+export function mcpServerNames(listing: string): string[] {
+  const parsed: unknown = JSON.parse(listing);
+  if (!Array.isArray(parsed)) throw new Error('codex mcp list --json did not return a list');
+  return parsed.map(entry => {
+    const name = (entry as { name?: unknown }).name;
+    if (typeof name !== 'string' || name === '') throw new Error('codex mcp list --json named a server without a name');
+    return name;
+  });
+}
+
+/**
+ * The MCP servers Codex itself resolves for a review in `cwd`, read from Codex so every
+ * configuration layer counts, not a guess at which files it reads. A listing that cannot
+ * be established fails the review: a server it would have named would otherwise stay on.
+ */
+function listMcpServers(cwd: string): string[] {
+  const result = Bun.spawnSync([codexExecutable(), 'mcp', 'list', '--json'], { cwd, timeout: 60_000, stdout: 'pipe', stderr: 'pipe' });
+  if (result.exitCode !== 0) throw new Error(`codex mcp list --json failed: ${result.stderr.toString().trim()}`);
+  return mcpServerNames(result.stdout.toString());
+}
+
 /**
  * The config switches that leave the reviewer with no tool but the read-only sandbox: no
- * plugins, no ChatGPT apps, no ambient skills, and every MCP server the user's or the
- * project's config.toml names turned off. The same switches a scoped workflow node rides on,
- * as `-c` overrides. A config that does not parse is reported, not skipped: a server it
- * names would otherwise stay on.
+ * plugins, no ChatGPT apps, no ambient skills, and every named MCP server turned off. The
+ * same switches a scoped workflow node rides on, as `-c` overrides.
  */
-export function reviewScope(configs: readonly string[]): string[] {
-  const servers = new Set<string>();
-  for (const text of configs) {
-    const parsed = Bun.TOML.parse(text) as { mcp_servers?: unknown };
-    const table = parsed.mcp_servers;
-    if (table && typeof table === 'object') for (const name of Object.keys(table)) servers.add(name);
-  }
+export function reviewScope(servers: readonly string[]): string[] {
   return [
     '-c', 'features.plugins=false',
     '-c', 'features.apps=false',
     '-c', 'skills.include_instructions=false',
-    ...[...servers].sort().flatMap(name => ['-c', `mcp_servers.${JSON.stringify(name)}.enabled=false`]),
+    ...[...new Set(servers)].sort().flatMap(name => ['-c', `mcp_servers.${JSON.stringify(name)}.enabled=false`]),
   ];
 }
 
-function readIfPresent(path: string): string {
-  try {
-    return readFileSync(path, 'utf8');
-  } catch {
-    return '';
-  }
-}
-
 export const codexCli: CodexRunner = ({ cwd, prompt, schemaPath, outputPath }) => {
-  const home = process.env.CODEX_HOME?.trim() || join(process.env.HOME ?? '', '.codex');
-  const scope = reviewScope([readIfPresent(join(home, 'config.toml')), readIfPresent(join(cwd, '.codex', 'config.toml'))]);
+  const scope = reviewScope(listMcpServers(cwd));
   const result = Bun.spawnSync(
     [
       codexExecutable(),

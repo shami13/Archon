@@ -13,6 +13,7 @@ import {
   CODEX_OUTPUT_SCHEMA,
   codexExecutable,
   observeCodexReview,
+  mcpServerNames,
   reviewScope,
   parseCodexOutput,
   type CodexObserveOptions,
@@ -230,7 +231,7 @@ describe('the external review node of the loop', () => {
     mkdirSync(bin);
     writeFileSync(
       join(bin, 'codex'),
-      '#!/bin/sh\nwhile [ "$1" != "--output-last-message" ]; do shift; done\nprintf \'%s\' \'{"findings":[],"assessment":"fine"}\' > "$2"\n',
+      '#!/bin/sh\nif [ "$1" = mcp ]; then printf \'[{"name":"docs"}]\'; exit 0; fi\nwhile [ "$1" != "--output-last-message" ]; do shift; done\nprintf \'%s\' \'{"findings":[],"assessment":"fine"}\' > "$2"\n',
       { mode: 0o755 }
     );
     const state = join(root, 'state');
@@ -301,23 +302,26 @@ describe('codexExecutable', () => {
 });
 
 describe('reviewScope', () => {
-  it('turns plugins, apps, skills and every configured MCP server off', () => {
-    const user = 'model = "x"\n[mcp_servers]\nfixture = { command = "f" }\n[mcp_servers.docs]\nurl = "https://d"\n[mcp_servers."kindly-web-search"]\nurl = "http://k"\n';
-    const project = '[mcp_servers.lad]\nurl = "http://l"\n';
-    expect(reviewScope([user, project])).toEqual([
+  it('turns plugins, apps, skills and every listed MCP server off', () => {
+    expect(reviewScope(['kindly-web-search', 'docs', 'docs'])).toEqual([
       '-c', 'features.plugins=false',
       '-c', 'features.apps=false',
       '-c', 'skills.include_instructions=false',
       '-c', 'mcp_servers."docs".enabled=false',
-      '-c', 'mcp_servers."fixture".enabled=false',
       '-c', 'mcp_servers."kindly-web-search".enabled=false',
-      '-c', 'mcp_servers."lad".enabled=false',
     ]);
-    expect(reviewScope([''])).toEqual([
+    expect(reviewScope([])).toEqual([
       '-c', 'features.plugins=false',
       '-c', 'features.apps=false',
       '-c', 'skills.include_instructions=false',
     ]);
-    expect(() => reviewScope(['[[broken'])).toThrow();
+  });
+
+  it('reads the server names from the codex mcp list output and refuses anything else', () => {
+    expect(mcpServerNames('[{"name":"docs","enabled":true},{"name":"lad","enabled":false}]')).toEqual(['docs', 'lad']);
+    expect(mcpServerNames('[]')).toEqual([]);
+    expect(() => mcpServerNames('{"servers":[]}')).toThrow('did not return a list');
+    expect(() => mcpServerNames('[{"enabled":true}]')).toThrow('without a name');
+    expect(() => mcpServerNames('not json')).toThrow();
   });
 });

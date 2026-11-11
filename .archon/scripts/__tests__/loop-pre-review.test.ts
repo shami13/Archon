@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
 import { repoOfOrigin } from '../../workflows/sdlc/.shared/builder-report';
-import { reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
+import { refuseBaseBranch, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
 
@@ -50,5 +50,12 @@ describe('repoOfOrigin', () => {
 
   it('refuses a remote it cannot name', () => {
     expect(() => repoOfOrigin('/srv/git/app.git')).toThrow(/not a repository URL/);
+  });
+});
+
+describe('refuseBaseBranch', () => {
+  it('refuses a push of the base branch onto itself and lets any other branch through', () => {
+    expect(() => { refuseBaseBranch('main', 'main'); }).toThrow('the base itself');
+    expect(() => { refuseBaseBranch('feat/x', 'main'); }).not.toThrow();
   });
 });

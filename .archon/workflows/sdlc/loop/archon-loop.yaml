@@ -131,8 +131,9 @@ nodes:
       until_bash: |
         value=$pre-review.output.clean
         test "$value" = "true"
-      # Three reviews: the builder's commit and up to two corrections. The third review
-      # schedules no correction, since no review would follow it.
+      # Three reviews: the builder's commit and up to two corrections. A third correction
+      # gets no review and is never pushed; the group then fails and the lap delivers
+      # nothing. Nothing here counts rounds from files: a resumed group starts at one.
       max_iterations: 3
       fresh_context: true
       nodes:
@@ -151,14 +152,13 @@ nodes:
               blocking: { type: integer }
               review: { type: string }
               summary: { type: string }
-              round: { type: string }
-            required: [head, clean, blocking, review, summary, round]
+            required: [head, clean, blocking, review, summary]
         - id: fix
           command: loop-fix
           context: fresh
           idle_timeout: 2700000
           depends_on: [pre-review]
-          when: "$pre-review.output.clean == 'false' && $pre-review.output.round != '3'"
+          when: "$pre-review.output.clean == 'false'"
           with:
             review: "$pre-review.output.review"
             builder: "$build.output"

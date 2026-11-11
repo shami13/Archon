@@ -138,7 +138,12 @@ function publish(): void {
   if (upstream !== '' && reported !== undefined && reported !== upstream) {
     throw new Error(`the builder reports ${reported}, but this move continues ${upstream}; nothing is pushed`);
   }
-  let url = upstream || reported || findOpenPrByHead(repo, repo, branch, source)?.pr.url || '';
+  // A pull request this node created in an earlier attempt is remembered here, open or not; the open-PR lookup
+  // covers an attempt that died before it could remember.
+  const createdPath = join(artifactsDir(), 'pull-request-created.json');
+  const earlier = readIf(createdPath);
+  const remembered = earlier === undefined ? undefined : (JSON.parse(earlier) as { url?: unknown }).url;
+  let url = upstream || reported || (typeof remembered === 'string' ? remembered : '') || findOpenPrByHead(repo, repo, branch, source)?.pr.url || '';
   if (url !== '') {
     const existing = viewPr(pullRefOf(url), source).pr;
     // A pull request merged or closed while Codex reviewed gets no push: its branch is history now.
@@ -166,6 +171,7 @@ function publish(): void {
       source
     );
     url = created.url;
+    writeFileSync(createdPath, `${JSON.stringify({ url })}\n`);
   } else {
     const ref = pullRefOf(url);
     const current = viewPr(ref, source);

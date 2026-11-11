@@ -123,7 +123,8 @@ export const codexCli: CodexRunner = ({ cwd, prompt, schemaPath, outputPath }) =
 
 /** Brings `origin/<base>` up to date, so the review diffs against the base the pull request merges into. */
 export function fetchBase(cwd: string, base: string): void {
-  const result = Bun.spawnSync(['git', 'fetch', '--quiet', 'origin', base], { cwd, stderr: 'pipe' });
+  // An explicit refspec: a clone whose fetch mapping does not cover `base` would otherwise leave origin/<base> stale or absent.
+  const result = Bun.spawnSync(['git', 'fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { cwd, stderr: 'pipe' });
   if (result.exitCode !== 0) {
     throw new Error(`git fetch origin ${base} failed: ${result.stderr.toString().trim()}`);
   }

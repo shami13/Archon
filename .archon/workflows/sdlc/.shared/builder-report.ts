@@ -51,7 +51,7 @@ export function withCodexReviewSection(body: string, section: string): string {
       return;
     }
     // A level-one or level-two heading, indented up to three spaces as Markdown allows, ends a section.
-    if (/^ {0,3}#{1,2} /.test(line)) headings.push(index);
+    if (/^ {0,3}#{1,2}[ \t]/.test(line)) headings.push(index);
     // A Setext heading: a text line underlined with = or - on the next line.
     else if (line.trim() !== '' && !/^ {0,3}(?:[-*+]|\d+[.)]) /.test(line) && /^ {0,3}(?:=+|-+)[ \t]*$/.test(lines[index + 1] ?? '')) headings.push(index);
   });

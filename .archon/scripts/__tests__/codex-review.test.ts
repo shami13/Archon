@@ -295,6 +295,6 @@ describe('codexExecutable', () => {
     expect(codexExecutable('  ')).toBe('codex');
     expect(codexExecutable('/opt/tools/codex-bin')).toBe('/opt/tools/codex-bin');
     const dir = mkdtempSync(join(tmpdir(), 'codex-pin-'));
-    expect(codexExecutable(dir)).toBe(join(dir, 'codex'));
+    expect(codexExecutable(dir)).toBe(join(dir, process.platform === 'win32' ? 'codex.exe' : 'codex'));
   });
 });

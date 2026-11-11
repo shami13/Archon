@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
-import { repoOfOrigin } from '../../workflows/sdlc/.shared/builder-report';
+import { repoOfOrigin, sshProbeArgs } from '../../workflows/sdlc/.shared/builder-report';
 import { abandonedContinuation, refuseBaseBranch, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
@@ -67,5 +67,13 @@ describe('abandonedContinuation', () => {
     expect(abandonedContinuation('BRANCH: b\nCOMMIT: abc\nPR: none', '')).toBe(false);
     expect(abandonedContinuation(`BRANCH: b\nCOMMIT: abc\nPR: ${url}`, url)).toBe(false);
     expect(abandonedContinuation('BRANCH: b\nCOMMIT: abc', url)).toBe(false);
+  });
+});
+
+describe('sshProbeArgs', () => {
+  it('passes the remote user to ssh -G so a Match user rule resolves as Git does', () => {
+    expect(sshProbeArgs('git@work-forge:owner/repo.git', 'work-forge')).toEqual(['-G', '-l', 'git', 'work-forge']);
+    expect(sshProbeArgs('ssh://deploy@github.com:22/example/app.git', 'github.com')).toEqual(['-G', '-l', 'deploy', 'github.com']);
+    expect(sshProbeArgs('work-forge:owner/repo', 'work-forge')).toEqual(['-G', 'work-forge']);
   });
 });

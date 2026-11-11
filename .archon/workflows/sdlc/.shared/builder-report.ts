@@ -105,9 +105,27 @@ export function repoOfOrigin(remote: string): { host: string; path: string } {
 export function canonicalRepoOfOrigin(remote: string): { host: string; path: string } {
   const repo = repoOfOrigin(remote);
   if (/^https?:\/\//.test(remote.trim())) return repo;
-  const probe = Bun.spawnSync(['ssh', '-G', repo.host], { stdout: 'pipe', stderr: 'ignore' });
+  const probe = Bun.spawnSync(['ssh', ...sshProbeArgs(remote, repo.host)], { stdout: 'pipe', stderr: 'ignore' });
   const hostname = /^hostname (\S+)$/m.exec(probe.stdout.toString())?.[1];
   return hostname === undefined || probe.exitCode !== 0 ? repo : { host: forgeHost(hostname), path: repo.path };
+}
+
+/**
+ * The `ssh -G` arguments that evaluate the destination Git itself uses: the user travels with the
+ * host, because a `Match user` rule may pick the Hostname.
+ */
+export function sshProbeArgs(remote: string, host: string): string[] {
+  const value = remote.trim();
+  const user = value.includes('://') ? safeUrl(value)?.username : /^([^@/]+)@[^/:]+:/.exec(value)?.[1];
+  return ['-G', ...(user ? ['-l', decodeURIComponent(user)] : []), host];
+}
+
+function safeUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The forge a transport host belongs to: GitHub's SSH-over-443 endpoint is github.com to the forge. */

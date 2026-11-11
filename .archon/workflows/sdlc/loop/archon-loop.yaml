@@ -118,10 +118,12 @@ nodes:
       runtime: "$INPUTS.runtime"
 
   # Codex reads the builder's commit before it leaves the checkout. Nothing is pushed
-  # until the review has no blocking finding or three correction rounds are spent;
-  # then publish pushes, opens or updates the pull request with the review's summary
-  # in its body, and keeps the review beside the pull request's ledger, so the gate
-  # after the push reuses it instead of reviewing the same head twice.
+  # until a review has no blocking finding; a correction round fixes and commits, and
+  # the next round reviews that commit. Three rounds that still block end the group
+  # as failed, so nothing is pushed and the next lap starts over. publish then pushes
+  # exactly the commit the clean review read, opens or updates the pull request with
+  # the review's summary in its body, and keeps the review beside the pull request's
+  # ledger, so the gate after the push reuses it instead of reviewing the head twice.
   - id: gate
     depends_on: [build]
     when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"

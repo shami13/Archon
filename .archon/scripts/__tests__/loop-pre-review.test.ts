@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
 import { repoOfOrigin } from '../../workflows/sdlc/.shared/builder-report';
-import { refuseBaseBranch, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
+import { abandonedContinuation, refuseBaseBranch, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
 
@@ -57,5 +57,15 @@ describe('refuseBaseBranch', () => {
   it('refuses a push of the base branch onto itself and lets any other branch through', () => {
     expect(() => { refuseBaseBranch('main', 'main'); }).toThrow('the base itself');
     expect(() => { refuseBaseBranch('feat/x', 'main'); }).not.toThrow();
+  });
+});
+
+describe('abandonedContinuation', () => {
+  it('is a PR: none report on a move that continues a pull request, and nothing else', () => {
+    const url = 'https://github.com/example/repo/pull/7';
+    expect(abandonedContinuation('BRANCH: b\nCOMMIT: abc\nPR: none because the owner must decide', url)).toBe(true);
+    expect(abandonedContinuation('BRANCH: b\nCOMMIT: abc\nPR: none', '')).toBe(false);
+    expect(abandonedContinuation(`BRANCH: b\nCOMMIT: abc\nPR: ${url}`, url)).toBe(false);
+    expect(abandonedContinuation('BRANCH: b\nCOMMIT: abc', url)).toBe(false);
   });
 });

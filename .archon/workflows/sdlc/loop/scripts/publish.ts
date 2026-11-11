@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalRepoOfOrigin, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
@@ -57,6 +57,14 @@ export function reviewSection(review: CodexReview): string {
     lines.push('', `- [${finding.priority}] ${finding.title} (${finding.path}${finding.line === null ? '' : `:${String(finding.line)}`}): ${finding.problem} Fix: ${finding.fix}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * A continuation the builder gave up: its report says `PR: none` although the move continues a pull
+ * request. For a new issue `PR: none` is the normal state before the pull request exists.
+ */
+export function abandonedContinuation(report: string, upstream: string): boolean {
+  return upstream !== '' && /^none\b/i.test(rawLine(report, 'PR') ?? '');
 }
 
 /** A builder that committed on the base itself has no branch to open a pull request from; a push would advance the base. */
@@ -140,6 +148,11 @@ function publish(): void {
   const section = reviewSection(review);
   const bodyPath = join(artifactsDir(), 'pull-request-body.md');
 
+  // The builder gave the continued pull request up; a clean review of what it committed does not override that.
+  if (abandonedContinuation(builder, upstream)) {
+    emit({ pr: '', head, published: 'false', reason: `the builder reports PR: none for ${upstream}; its commit is not pushed` });
+    return;
+  }
   // An earlier attempt of this node may have opened the pull request already; find it by its branch.
   const reported = reportLine(builder, 'PR');
   if (upstream !== '' && reported !== undefined && reported !== upstream) {

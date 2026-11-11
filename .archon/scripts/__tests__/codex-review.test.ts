@@ -307,14 +307,15 @@ describe('reviewScope', () => {
       '-c', 'features.plugins=false',
       '-c', 'features.apps=false',
       '-c', 'skills.include_instructions=false',
-      '-c', 'mcp_servers."docs".enabled=false',
-      '-c', 'mcp_servers."kindly-web-search".enabled=false',
+      '-c', 'mcp_servers.docs.enabled=false',
+      '-c', 'mcp_servers.kindly-web-search.enabled=false',
     ]);
     expect(reviewScope([])).toEqual([
       '-c', 'features.plugins=false',
       '-c', 'features.apps=false',
       '-c', 'skills.include_instructions=false',
     ]);
+    expect(() => reviewScope(['my.server'])).toThrow('cannot be switched off');
   });
 
   it('reads the server names from the codex mcp list output and refuses anything else', () => {
@@ -323,5 +324,19 @@ describe('reviewScope', () => {
     expect(() => mcpServerNames('{"servers":[]}')).toThrow('did not return a list');
     expect(() => mcpServerNames('[{"enabled":true}]')).toThrow('without a name');
     expect(() => mcpServerNames('not json')).toThrow();
+  });
+
+  // The installed Codex, when there is one: the overrides must load and leave every server off.
+  it.skipIf(Bun.which('codex') === null)('is accepted by the installed Codex and disables every configured server', () => {
+    const codex = Bun.which('codex') ?? 'codex';
+    const listed = Bun.spawnSync([codex, 'mcp', 'list', '--json'], { stdout: 'pipe', stderr: 'pipe' });
+    expect(listed.exitCode).toBe(0);
+    const names = mcpServerNames(listed.stdout.toString());
+    const scoped = Bun.spawnSync([codex, ...reviewScope(names), 'mcp', 'list', '--json'], { stdout: 'pipe', stderr: 'pipe' });
+    expect(scoped.stderr.toString()).toBe('');
+    expect(scoped.exitCode).toBe(0);
+    const servers = JSON.parse(scoped.stdout.toString()) as { name: string; enabled: boolean }[];
+    expect(servers.map(server => server.name).sort()).toEqual([...names].sort());
+    expect(servers.filter(server => server.enabled)).toEqual([]);
   });
 });

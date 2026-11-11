@@ -129,11 +129,14 @@ function listMcpServers(cwd: string): string[] {
  * same switches a scoped workflow node rides on, as `-c` overrides.
  */
 export function reviewScope(servers: readonly string[]): string[] {
+  // A `-c` key path takes bare TOML keys only; a name this cannot address would stay on, so it fails the review.
+  const unaddressable = servers.find(name => !/^[A-Za-z0-9_-]+$/.test(name));
+  if (unaddressable !== undefined) throw new Error(`the MCP server ${JSON.stringify(unaddressable)} cannot be switched off from the command line`);
   return [
     '-c', 'features.plugins=false',
     '-c', 'features.apps=false',
     '-c', 'skills.include_instructions=false',
-    ...[...new Set(servers)].sort().flatMap(name => ['-c', `mcp_servers.${JSON.stringify(name)}.enabled=false`]),
+    ...[...new Set(servers)].sort().flatMap(name => ['-c', `mcp_servers.${name}.enabled=false`]),
   ];
 }
 

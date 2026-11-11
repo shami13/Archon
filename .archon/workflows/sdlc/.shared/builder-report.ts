@@ -37,14 +37,18 @@ export function withCodexReviewSection(body: string, section: string): string {
   // A fence closes only with the same character, at least as long; a shorter or different run is content.
   let fence: { char: string; length: number } | undefined;
   lines.forEach((line, index) => {
-    const run = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (run !== undefined) {
-      const char = run.charAt(0);
-      if (fence === undefined) fence = { char, length: run.length };
-      else if (fence.char === char && run.length >= fence.length) fence = undefined;
+    const run = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (run !== null && fence === undefined) {
+      fence = { char: run[1]?.charAt(0) ?? '', length: run[1]?.length ?? 0 };
       return;
     }
-    if (fence === undefined && line.startsWith('## ')) headings.push(index);
+    if (fence !== undefined) {
+      // Only a run of the same character, at least as long, with nothing but blanks after it, closes the fence.
+      const closes = run !== null && (run[1] ?? '').startsWith(fence.char) && (run[1]?.length ?? 0) >= fence.length && (run[2] ?? '').trim() === '';
+      if (closes) fence = undefined;
+      return;
+    }
+    if (line.startsWith('## ')) headings.push(index);
   });
   const start = headings.find(index => lines[index]?.trimEnd() === CODEX_REVIEW_HEADING);
   if (start === undefined) return `${body.replace(/\s+$/, '')}\n\n${block}`;

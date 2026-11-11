@@ -53,6 +53,11 @@ describe('withCodexReviewSection', () => {
     expect(withCodexReviewSection(body, 'new')).toBe(`${body}\n## Codex review\n\nnew\n`);
   });
 
+  it('does not close a fence on a run followed by text', () => {
+    const body = 'Intro\n\n```markdown\n```typescript\n## Codex review\n\nexample\n```\n\n## Evidence\n\n- C1: ok\n';
+    expect(withCodexReviewSection(body, 'new')).toBe(`${body}\n## Codex review\n\nnew\n`);
+  });
+
   it('replaces a trailing section', () => {
     expect(withCodexReviewSection('Body\n\n## Codex review\n\nold\n', 'new')).toBe('Body\n\n## Codex review\n\nnew\n');
   });

@@ -117,6 +117,8 @@ function publish(): void {
       emit({ pr: upstream, head, published: upstream === '' ? 'false' : 'true', reason: 'the builder committed nothing' });
       return;
     }
+    // The writes go to the pull request this move continues, never to one the report happens to name.
+    if (kept !== upstream) throw new Error(`the builder reports ${kept}, but this move continues ${upstream}; nothing is written`);
     const ref = pullRefOf(kept);
     const current = viewPr(ref, source);
     const body = readIf(join(files, 'body.md'));
@@ -139,7 +141,11 @@ function publish(): void {
   const bodyPath = join(artifactsDir(), 'pull-request-body.md');
 
   // An earlier attempt of this node may have opened the pull request already; find it by its branch.
-  let url = upstream || reportLine(builder, 'PR') || findOpenPrByHead(repo, repo, branch, source)?.pr.url || '';
+  const reported = reportLine(builder, 'PR');
+  if (upstream !== '' && reported !== undefined && reported !== upstream) {
+    throw new Error(`the builder reports ${reported}, but this move continues ${upstream}; nothing is pushed`);
+  }
+  let url = upstream || reported || findOpenPrByHead(repo, repo, branch, source)?.pr.url || '';
   if (url !== '') {
     const existing = viewPr(pullRefOf(url), source).pr;
     if (existing.head_repo !== null && (existing.head_repo.host.toLowerCase() !== repo.host || existing.head_repo.path.toLowerCase() !== repo.path.toLowerCase())) {

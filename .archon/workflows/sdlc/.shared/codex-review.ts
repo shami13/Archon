@@ -103,18 +103,23 @@ export function codexExecutable(pin: string | undefined = process.env.CODEX_BIN_
 
 /**
  * The config switches that leave the reviewer with no tool but the read-only sandbox: no
- * plugins, no ChatGPT apps, and every MCP server the user's or the project's config.toml
- * names turned off. The same switches a scoped workflow node rides on, as `-c` overrides.
+ * plugins, no ChatGPT apps, no ambient skills, and every MCP server the user's or the
+ * project's config.toml names turned off. The same switches a scoped workflow node rides on,
+ * as `-c` overrides. A config that does not parse is reported, not skipped: a server it
+ * names would otherwise stay on.
  */
 export function reviewScope(configs: readonly string[]): string[] {
   const servers = new Set<string>();
   for (const text of configs) {
-    for (const match of text.matchAll(/^\s*\[mcp_servers\.("?)([^\]"]+)\1\]/gm)) servers.add(match[2] ?? '');
+    const parsed = Bun.TOML.parse(text) as { mcp_servers?: unknown };
+    const table = parsed.mcp_servers;
+    if (table && typeof table === 'object') for (const name of Object.keys(table)) servers.add(name);
   }
   return [
     '-c', 'features.plugins=false',
     '-c', 'features.apps=false',
-    ...[...servers].filter(name => name !== '').sort().flatMap(name => ['-c', `mcp_servers.${JSON.stringify(name)}.enabled=false`]),
+    '-c', 'skills.include_instructions=false',
+    ...[...servers].sort().flatMap(name => ['-c', `mcp_servers.${JSON.stringify(name)}.enabled=false`]),
   ];
 }
 

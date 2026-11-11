@@ -301,16 +301,23 @@ describe('codexExecutable', () => {
 });
 
 describe('reviewScope', () => {
-  it('turns plugins, apps and every configured MCP server off', () => {
-    const user = 'model = "x"\n[mcp_servers.docs]\nurl = "https://d"\n[mcp_servers."kindly-web-search"]\nurl = "http://k"\n';
+  it('turns plugins, apps, skills and every configured MCP server off', () => {
+    const user = 'model = "x"\n[mcp_servers]\nfixture = { command = "f" }\n[mcp_servers.docs]\nurl = "https://d"\n[mcp_servers."kindly-web-search"]\nurl = "http://k"\n';
     const project = '[mcp_servers.lad]\nurl = "http://l"\n';
     expect(reviewScope([user, project])).toEqual([
       '-c', 'features.plugins=false',
       '-c', 'features.apps=false',
+      '-c', 'skills.include_instructions=false',
       '-c', 'mcp_servers."docs".enabled=false',
+      '-c', 'mcp_servers."fixture".enabled=false',
       '-c', 'mcp_servers."kindly-web-search".enabled=false',
       '-c', 'mcp_servers."lad".enabled=false',
     ]);
-    expect(reviewScope([''])).toEqual(['-c', 'features.plugins=false', '-c', 'features.apps=false']);
+    expect(reviewScope([''])).toEqual([
+      '-c', 'features.plugins=false',
+      '-c', 'features.apps=false',
+      '-c', 'skills.include_instructions=false',
+    ]);
+    expect(() => reviewScope(['[[broken'])).toThrow();
   });
 });

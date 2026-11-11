@@ -173,8 +173,10 @@ export function gitSshCommand(env: NodeJS.ProcessEnv = process.env): string {
  */
 export function sshProbeArgs(remote: string, host: string): string[] {
   const value = remote.trim();
-  const user = value.includes('://') ? safeUrl(value)?.username : /^([^@/]+)@[^/:]+:/.exec(value)?.[1];
-  return ['-G', ...(user ? ['-l', decodeURIComponent(user)] : []), host];
+  const url = value.includes('://') ? safeUrl(value) : undefined;
+  const user = url === undefined ? /^([^@/]+)@[^/:]+:/.exec(value)?.[1] : url.username;
+  // The port travels too: a `Match exec` rule may read %p.
+  return ['-G', ...(user ? ['-l', decodeURIComponent(user)] : []), ...(url?.port ? ['-p', url.port] : []), host];
 }
 
 function safeUrl(value: string): URL | undefined {

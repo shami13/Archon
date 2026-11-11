@@ -73,7 +73,9 @@ describe('abandonedContinuation', () => {
 describe('sshProbeArgs', () => {
   it('passes the remote user to ssh -G so a Match user rule resolves as Git does', () => {
     expect(sshProbeArgs('git@work-forge:owner/repo.git', 'work-forge')).toEqual(['-G', '-l', 'git', 'work-forge']);
-    expect(sshProbeArgs('ssh://deploy@github.com:22/example/app.git', 'github.com')).toEqual(['-G', '-l', 'deploy', 'github.com']);
+    expect(sshProbeArgs('ssh://deploy@github.com:22/example/app.git', 'github.com')).toEqual(['-G', '-l', 'deploy', '-p', '22', 'github.com']);
+    expect(sshProbeArgs('ssh://git@forge-alias:2222/owner/repo.git', 'forge-alias')).toEqual(['-G', '-l', 'git', '-p', '2222', 'forge-alias']);
+    expect(sshProbeArgs('ssh://git@github.com/example/app.git', 'github.com')).toEqual(['-G', '-l', 'git', 'github.com']);
     expect(sshProbeArgs('work-forge:owner/repo', 'work-forge')).toEqual(['-G', 'work-forge']);
   });
 });

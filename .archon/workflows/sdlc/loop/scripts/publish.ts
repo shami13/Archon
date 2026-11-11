@@ -14,12 +14,12 @@
  * - INPUTS_PR: the pull request URL the move continues; empty for a new issue.
  * - INPUTS_TARGET: the work item URL; a new pull request body closes it.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalRepoOfOrigin, publicationDeclined, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
-import { forgeSource, sameRepo, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
+import { ForgeOperationError, type ForgeSource, type QualifiedPr, forgeSource, sameRepo } from '../../.shared/forge.ts';
 import { artifactsDir, emit, refuse, runId, stateDir, trimmed } from '../../.shared/io.ts';
 import { createPr, editPrBody, findPrByHead, markPrReady, upsertComment, viewPr } from '../../.shared/pr.ts';
 
@@ -215,10 +215,18 @@ function publish(): void {
     const title = (readIf(join(files, 'title.txt')) ?? git(['log', '-1', '--format=%s'])).trim();
     // The attempt is on record before the forge is asked, so a death between creation and read-back is found again.
     writeFileSync(createdPath, `${JSON.stringify({ attempt: { branch, head } })}\n`);
-    const created = createPr(
-      { repo, headRepo: repo, head: branch, headRevision: head, base: review.base, title, bodyPath, draft: false },
-      source
-    );
+    let created;
+    try {
+      created = createPr(
+        { repo, headRepo: repo, head: branch, headRevision: head, base: review.base, title, bodyPath, draft: false },
+        source
+      );
+    } catch (error) {
+      // A definite refusal created nothing: without the receipt the next attempt creates again instead of
+      // adopting an older pull request of this branch. An unknown outcome keeps the receipt.
+      if (error instanceof ForgeOperationError && error.mutation?.outcome === 'refused') unlinkSync(createdPath);
+      throw error;
+    }
     url = created.url;
     writeFileSync(createdPath, `${JSON.stringify({ url })}\n`);
   } else {

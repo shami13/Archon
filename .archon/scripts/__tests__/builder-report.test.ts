@@ -63,6 +63,11 @@ describe('withCodexReviewSection', () => {
     expect(withCodexReviewSection(body, 'new')).toBe('Closes #5\n\n## Codex review\n\nnew\n\n# Release notes\n\nUser notes.\n');
   });
 
+  it('reads a CRLF body the same way', () => {
+    const body = 'Intro\r\n\r\n```md\r\n## Codex review\r\n\r\nexample\r\n```\r\n\r\nRoll out slowly.\r\n';
+    expect(withCodexReviewSection(body, 'new')).toBe('Intro\n\n```md\n## Codex review\n\nexample\n```\n\nRoll out slowly.\n\n## Codex review\n\nnew\n');
+  });
+
   it('replaces a trailing section', () => {
     expect(withCodexReviewSection('Body\n\n## Codex review\n\nold\n', 'new')).toBe('Body\n\n## Codex review\n\nnew\n');
   });

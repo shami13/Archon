@@ -44,6 +44,7 @@ describe('repoOfOrigin', () => {
     expect(repoOfOrigin('git@github.company.test:example/app')).toEqual({ host: 'github.company.test', path: 'example/app' });
     expect(repoOfOrigin('ssh://git@github.com:22/example/app.git\n')).toEqual({ host: 'github.com', path: 'example/app' });
     expect(repoOfOrigin('ssh://git@github.com/example/app.git')).toEqual({ host: 'github.com', path: 'example/app' });
+    expect(repoOfOrigin('git@github.com:/example/app.git')).toEqual({ host: 'github.com', path: 'example/app' });
   });
 
   it('refuses a remote it cannot name', () => {

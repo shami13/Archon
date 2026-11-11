@@ -31,7 +31,8 @@ export const CODEX_REVIEW_HEADING = '## Codex review';
  */
 export function withCodexReviewSection(body: string, section: string): string {
   const block = `${CODEX_REVIEW_HEADING}\n\n${section.trim()}\n`;
-  const lines = body.split('\n');
+  // Line endings are normalised first: a CRLF body would otherwise hide every fence behind its trailing \r.
+  const lines = body.replace(/\r\n/g, '\n').split('\n');
   // Headings on lines of their own, outside fenced code; a mention in prose or an example in a fence is neither.
   const headings: number[] = [];
   // A fence closes only with the same character, at least as long; a shorter or different run is content.
@@ -62,7 +63,7 @@ export function withCodexReviewSection(body: string, section: string): string {
 /** The repository origin points at, host included, from an https, ssh:// or scp-style remote. */
 export function repoOfOrigin(remote: string): { host: string; path: string } {
   const value = remote.trim();
-  const scp = /^(?:[^@/]+@)?([^/:]+):([^/].*)$/.exec(value);
+  const scp = /^(?:[^@/]+@)?([^/:]+):(.+)$/.exec(value);
   let host: string;
   let path: string;
   if (scp !== null && !value.includes('://')) {
@@ -77,7 +78,7 @@ export function repoOfOrigin(remote: string): { host: string; path: string } {
     host = url.hostname;
     path = url.pathname.replace(/^\/+/, '');
   }
-  path = path.replace(/\/+$/, '').replace(/\.git$/, '');
+  path = path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '');
   // The URL stays out of the message: a remote may carry a credential.
   if (host === '' || !/^[^/]+\/[^/]+$/.test(path)) throw new Error('origin is not a repository URL this loop can publish to');
   return { host: host.toLowerCase(), path };

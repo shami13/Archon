@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
 import { canonicalRepoOfOrigin, gitSshCommand, probeShell, repoOfOrigin, sshProbeArgs } from '../../workflows/sdlc/.shared/builder-report';
-import { abandonedContinuation, refuseBaseBranch, reviewSection, samePullRequest } from '../../workflows/sdlc/loop/scripts/publish';
+import { abandonedContinuation, assertHeadInOrigin, refuseBaseBranch, reviewSection, samePullRequest } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
 
@@ -123,5 +123,14 @@ describe('probeShell', () => {
       if (before === undefined) delete process.env.ARCHON_BASH_PATH;
       else process.env.ARCHON_BASH_PATH = before;
     }
+  });
+});
+
+describe('assertHeadInOrigin', () => {
+  const origin = { host: 'github.com', path: 'example/repo' };
+  it('lets a head in origin through and refuses a fork or an unnamed head repository', () => {
+    expect(() => { assertHeadInOrigin('u', { host: 'GitHub.com', path: 'Example/Repo' }, origin); }).not.toThrow();
+    expect(() => { assertHeadInOrigin('u', { host: 'github.com', path: 'someone/repo' }, origin); }).toThrow('pushes to origin only');
+    expect(() => { assertHeadInOrigin('u', null, origin); }).toThrow('names no head repository');
   });
 });

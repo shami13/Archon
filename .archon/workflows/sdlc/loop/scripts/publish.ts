@@ -59,6 +59,15 @@ export function reviewSection(review: CodexReview): string {
   return lines.join('\n');
 }
 
+/**
+ * The pull request's head must live in origin, where this loop pushes. A head repository the forge
+ * did not name is refused too: a push to origin would then update a branch the pull request may not read.
+ */
+export function assertHeadInOrigin(url: string, headRepo: QualifiedPr['repo'] | null, origin: QualifiedPr['repo']): void {
+  if (headRepo === null) throw new Error(`${url} names no head repository; this loop pushes to origin only and cannot tell that origin holds its head`);
+  if (!sameRepo(headRepo, origin)) throw new Error(`${url} has its head in ${headRepo.path}; this loop pushes to origin only`);
+}
+
 /** Whether two pull request URLs name the same pull request, whatever their spelling (a trailing slash, letter case). */
 export function samePullRequest(left: string, right: string): boolean {
   const a = pullRefOf(left);
@@ -178,9 +187,7 @@ function publish(): void {
       emit({ pr: '', head, published: 'false', reason: `${url} is ${existing.state}; the reviewed commit was not pushed` });
       return;
     }
-    if (existing.head_repo !== null && (existing.head_repo.host.toLowerCase() !== repo.host || existing.head_repo.path.toLowerCase() !== repo.path.toLowerCase())) {
-      throw new Error(`${url} has its head in ${existing.head_repo.path}; this loop pushes to origin only`);
-    }
+    assertHeadInOrigin(url, existing.head_repo, repo);
     if (existing.head !== branch) throw new Error(`${url} has head ${existing.head}, not the builder's branch ${branch}`);
     // The review diffed against this base; a pull request into another branch is a different change.
     if (existing.base !== review.base) throw new Error(`${url} merges into ${existing.base}, but the review diffed against ${review.base}`);

@@ -41,12 +41,6 @@ function readIf(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
 
-function defaultBranch(): string {
-  const result = Bun.spawnSync(['git', 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { stdout: 'pipe', stderr: 'ignore' });
-  const ref = result.stdout.toString().trim();
-  return ref.startsWith('refs/remotes/origin/') ? ref.slice('refs/remotes/origin/'.length) : 'main';
-}
-
 /** What the body says about the review: its summary line, plus any blocking finding it still names. */
 export function reviewSection(review: CodexReview): string {
   const blocking = review.findings.filter(finding => BLOCKING.includes(finding.priority));
@@ -70,9 +64,7 @@ function publish(): void {
   const review = existsSync(reviewPath) ? (JSON.parse(readFileSync(reviewPath, 'utf8')) as CodexReview) : undefined;
   const upstream = trimmed(process.env.INPUTS_PR);
   if (review === undefined) {
-    // The gate reviews nothing when the branch adds no commit; then there is nothing to push either.
-    const base = upstream === '' ? defaultBranch() : viewPr(pullRefOf(upstream), forgeSource()).pr.base;
-    if (git(['rev-list', '--count', `origin/${base}..HEAD`]) !== '0') throw new Error(`no pre-push review of ${head.slice(0, 7)} was recorded; nothing is pushed`);
+    // The gate reviewed nothing: the builder committed nothing, so there is nothing to push, open or mark ready.
     emit({ pr: upstream, head });
     return;
   }
@@ -81,10 +73,7 @@ function publish(): void {
   }
 
   const source = forgeSource();
-  const repoView = JSON.parse(gh(['repo', 'view', '--json', 'nameWithOwner,defaultBranchRef'])) as {
-    nameWithOwner: string;
-    defaultBranchRef: { name: string };
-  };
+  const repoView = JSON.parse(gh(['repo', 'view', '--json', 'nameWithOwner'])) as { nameWithOwner: string };
   const repo: QualifiedPr['repo'] = { host: 'github.com', path: repoView.nameWithOwner };
   const files = join(artifactsDir(), 'pull-request');
   const section = reviewSection(review);
@@ -98,6 +87,8 @@ function publish(): void {
       throw new Error(`${url} has its head in ${existing.head_repo.path}; this loop pushes to origin only`);
     }
     if (existing.head !== branch) throw new Error(`${url} has head ${existing.head}, not the builder's branch ${branch}`);
+    // The review diffed against this base; a pull request into another branch is a different change.
+    if (existing.base !== review.base) throw new Error(`${url} merges into ${existing.base}, but the review diffed against ${review.base}`);
   }
   // The reviewed commit by its SHA, so a branch that moved meanwhile cannot slip in.
   git(['push', '--set-upstream', 'origin', `${head}:refs/heads/${branch}`]);
@@ -108,7 +99,7 @@ function publish(): void {
     writeFileSync(bodyPath, withCodexReviewSection(body, section));
     const title = (readIf(join(files, 'title.txt')) ?? git(['log', '-1', '--format=%s'])).trim();
     const created = createPr(
-      { repo, headRepo: repo, head: branch, headRevision: head, base: repoView.defaultBranchRef.name, title, bodyPath, draft: false },
+      { repo, headRepo: repo, head: branch, headRevision: head, base: review.base, title, bodyPath, draft: false },
       source
     );
     url = created.url;

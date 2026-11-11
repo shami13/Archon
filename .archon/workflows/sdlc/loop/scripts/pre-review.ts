@@ -50,6 +50,13 @@ function review(): void {
   const current = git(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (current !== branch) throw new Error(`the checkout is on ${current}, not on the builder's branch ${branch}`);
   const head = git(['rev-parse', 'HEAD']);
+  // A builder that committed nothing (the move was wrong, or a decision is the owner's) reports no COMMIT.
+  const committed = reportLine(builder, 'COMMIT');
+  if (committed === undefined) {
+    emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder committed nothing; nothing to review or push' });
+    return;
+  }
+  if (!head.startsWith(committed)) throw new Error(`HEAD is ${head.slice(0, 7)} but the builder reported COMMIT ${committed.slice(0, 7)}`);
   // A continued pull request may merge into a branch other than the default one; review against that.
   const base = pr === '' ? defaultBranch() : viewPr(pullRefOf(pr), forgeSource()).pr.base;
   const dir = join(artifactsDir(), 'pre-review');

@@ -990,27 +990,21 @@ describe('the merge paths under the external review gate', () => {
     );
   });
 
-  it('refuses a moved base without pushing a merge no Copilot review covers', () => {
-    const checkout = landCheckout(true);
-    const state = scratch();
-    passed(state, checkout.sha);
-    const run = land(checkout, state, 'copilot');
-    expect(run.code).toBe(0);
-    const result = JSON.parse(run.stdout) as { outcome: string; reason: string };
-    expect(result.outcome).toBe('refused');
-    expect(result.reason).toContain('dev has moved past the reviewed head');
-    expect(result.reason).toContain('through archon-deliver');
-    expect(run.gh.some(call => call.startsWith('pr merge'))).toBe(false);
-    expect(git(checkout.origin, 'rev-parse', 'refs/heads/feature')).toBe(checkout.sha);
-  });
-
-  it('still merges a moved base in first when the gate is off', () => {
-    const checkout = landCheckout(true);
-    const run = land(checkout, scratch(), 'none');
-    const pushed = git(checkout.origin, 'rev-parse', 'refs/heads/feature');
-    expect(pushed).not.toBe(checkout.sha);
-    expect(git(checkout.origin, 'rev-parse', `${pushed}^1`)).toBe(checkout.sha);
-    expect(run.gh.some(call => call.startsWith(`pr merge https://github.com/${REF.repo.path}/pull/42 --squash --match-head-commit ${pushed}`))).toBe(true);
+  it('refuses a moved base without pushing a merge no review covers, whatever the gate mode', () => {
+    for (const mode of ['copilot', 'none'] as const) {
+      const checkout = landCheckout(true);
+      const state = scratch();
+      if (mode === 'copilot') passed(state, checkout.sha);
+      const run = land(checkout, state, mode);
+      expect(run.code).toBe(0);
+      const result = JSON.parse(run.stdout) as { outcome: string; reason: string };
+      expect(result.outcome).toBe('refused');
+      expect(result.reason).toContain('dev has moved past the reviewed head');
+      expect(result.reason).toContain('pre-push review');
+      expect(run.gh.some(call => call.startsWith('pr merge'))).toBe(false);
+      // The branch on origin keeps the reviewed head: the gate made no merge commit of its own.
+      expect(git(checkout.origin, 'rev-parse', 'refs/heads/feature')).toBe(checkout.sha);
+    }
   });
 
   it('holds what it cannot confirm', () => {

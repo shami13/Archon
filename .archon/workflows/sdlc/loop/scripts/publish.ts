@@ -186,7 +186,10 @@ function publish(): void {
     if (existing.base !== review.base) throw new Error(`${url} merges into ${existing.base}, but the review diffed against ${review.base}`);
   }
   // The reviewed commit by its SHA, so a branch that moved meanwhile cannot slip in.
-  git(['push', '--set-upstream', 'origin', `${head}:refs/heads/${branch}`]);
+  git(['push', 'origin', `${head}:refs/heads/${branch}`]);
+  // A push by SHA leaves the branch's tracking as it was; the builder's next plain push must reach this branch.
+  git(['config', `branch.${branch}.remote`, 'origin']);
+  git(['config', `branch.${branch}.merge`, `refs/heads/${branch}`]);
 
   if (url === '') {
     const issue = /\/issues\/(\d+)\/?$/.exec(target)?.[1];

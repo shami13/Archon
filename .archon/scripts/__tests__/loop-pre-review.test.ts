@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
-import { reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
+import { repoOfOrigin, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
 
@@ -34,5 +34,17 @@ describe('reviewSection', () => {
     expect(section).toContain('1 blocking finding(s), 1 advisory note(s)');
     expect(section).toContain('- [P2] edge (src/app.ts:12): it is wrong Fix: check it');
     expect(section).not.toContain('nit');
+  });
+});
+
+describe('repoOfOrigin', () => {
+  it('reads host and path from https and ssh remotes, with or without .git', () => {
+    expect(repoOfOrigin('https://github.com/shami13/darunki.git')).toEqual({ host: 'github.com', path: 'shami13/darunki' });
+    expect(repoOfOrigin('git@github.company.test:example/app')).toEqual({ host: 'github.company.test', path: 'example/app' });
+    expect(repoOfOrigin('ssh://git@github.com:22/example/app.git\n')).toEqual({ host: 'github.com', path: 'example/app' });
+  });
+
+  it('refuses a remote it cannot name', () => {
+    expect(() => repoOfOrigin('/srv/git/app.git')).toThrow(/not a GitHub repository URL/);
   });
 });

@@ -41,6 +41,13 @@ function readIf(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
 
+/** The repository origin points at, host included, from an https or ssh remote URL. */
+export function repoOfOrigin(remote: string): QualifiedPr['repo'] {
+  const match = /^(?:https?:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/|(?:ssh:\/\/)?(?:[^@]+@)?([^/:]+):(?:\d+\/)?)([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote.trim());
+  if (match === null) throw new Error(`origin ${remote.trim()} is not a GitHub repository URL this loop can publish to`);
+  return { host: (match[1] ?? match[2] ?? '').toLowerCase(), path: match[3] ?? '' };
+}
+
 /** What the body says about the review: its summary line, plus any blocking finding it still names. */
 export function reviewSection(review: CodexReview): string {
   const blocking = review.findings.filter(finding => BLOCKING.includes(finding.priority));
@@ -65,12 +72,27 @@ function publish(): void {
   const upstream = trimmed(process.env.INPUTS_PR);
   const files = join(artifactsDir(), 'pull-request');
   const source = forgeSource();
+  // This node runs whatever the gate did, so that a failed gate is a fact downstream reads
+  // (`published: "false"`, no pull request this lap) rather than a hole in the graph. It pushes
+  // only when the latest review is of HEAD and clean.
+  if (review?.head === head && review.findings.some(finding => BLOCKING.includes(finding.priority))) {
+    emit({ pr: '', head, published: 'false', reason: `the pre-push review of ${head.slice(0, 7)} still has blocking findings` });
+    return;
+  }
+  if (review !== undefined && review.head !== head) {
+    emit({ pr: '', head, published: 'false', reason: `HEAD is ${head.slice(0, 7)} but the last review read ${review.head.slice(0, 7)}` });
+    return;
+  }
+  if (review === undefined && reportLine(builder, 'COMMIT') !== undefined) {
+    emit({ pr: '', head, published: 'false', reason: `no pre-push review of ${head.slice(0, 7)} was recorded` });
+    return;
+  }
   if (review === undefined) {
     // The gate reviewed nothing because the builder committed nothing. A move it gave up (PR: none) changes
     // nothing; a continued pull request that needed only its body, comment or ready state still gets those.
     const kept = reportLine(builder, 'PR');
     if (upstream === '' || kept === undefined) {
-      emit({ pr: upstream, head });
+      emit({ pr: upstream, head, published: upstream === '' ? 'false' : 'true', reason: 'the builder committed nothing' });
       return;
     }
     const ref = pullRefOf(kept);
@@ -84,15 +106,14 @@ function publish(): void {
     const comment = readIf(join(files, 'comment.md'));
     if (comment !== undefined && comment.trim() !== '') gh(['pr', 'comment', kept, '--body-file', join(files, 'comment.md')]);
     if (current.pr.is_draft) markPrReady(ref, source);
-    emit({ pr: kept, head });
+    emit({ pr: kept, head, published: 'true', reason: 'the builder committed nothing; the pull request was brought up to date' });
     return;
   }
   if (review.head !== head) {
     throw new Error(`HEAD is ${head.slice(0, 7)} but the clean review read ${review.head.slice(0, 7)}; nothing is pushed until it is reviewed again`);
   }
 
-  const repoView = JSON.parse(gh(['repo', 'view', '--json', 'nameWithOwner'])) as { nameWithOwner: string };
-  const repo: QualifiedPr['repo'] = { host: 'github.com', path: repoView.nameWithOwner };
+  const repo = repoOfOrigin(git(['remote', 'get-url', 'origin']));
   const section = reviewSection(review);
   const bodyPath = join(artifactsDir(), 'pull-request-body.md');
 
@@ -131,7 +152,7 @@ function publish(): void {
   const comment = readIf(join(files, 'comment.md'));
   if (comment !== undefined && comment.trim() !== '') gh(['pr', 'comment', url, '--body-file', join(files, 'comment.md')]);
   storeReview(Ledger.forPull(stateDir(), pullRefOf(url), runId()), review);
-  emit({ pr: url, head });
+  emit({ pr: url, head, published: 'true', reason: `pushed ${head.slice(0, 7)} after a clean review` });
 }
 
 if (import.meta.main) {

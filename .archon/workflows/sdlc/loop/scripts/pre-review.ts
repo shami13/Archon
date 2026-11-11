@@ -12,7 +12,7 @@
  * - INPUTS_BUILDER: the builder's report; its `BRANCH:` line names the branch to review.
  * - INPUTS_PR: the pull request URL when the move continues one; empty for a new issue.
  */
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { reportLine } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
@@ -50,11 +50,15 @@ function review(): void {
   const branch = reportLine(builder, 'BRANCH') ?? git(['rev-parse', '--abbrev-ref', 'HEAD']);
   const current = git(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (current !== branch) throw new Error(`the checkout is on ${current}, not on the builder's branch ${branch}`);
+  const dir = join(artifactsDir(), 'pre-review');
+  mkdirSync(dir, { recursive: true });
+  // Which review this is in this run: one file per reviewed head is already there for each earlier round.
+  const round = String(readdirSync(dir).filter(name => name.endsWith('.json') && name !== 'latest.json').length + 1);
   const head = git(['rev-parse', 'HEAD']);
   // A builder that committed nothing (the move was wrong, or a decision is the owner's) reports no COMMIT.
   const committed = reportLine(builder, 'COMMIT');
   if (committed === undefined) {
-    emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder committed nothing; nothing to review or push' });
+    emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder committed nothing; nothing to review or push', round });
     return;
   }
   // A correction round commits on top of the builder's commit, so HEAD is that commit or a descendant of it.
@@ -62,11 +66,9 @@ function review(): void {
   if (descends.exitCode !== 0) throw new Error(`HEAD ${head.slice(0, 7)} does not contain the builder's COMMIT ${committed.slice(0, 7)}`);
   // A continued pull request may merge into a branch other than the default one; review against that.
   const base = pr === '' ? defaultBranch() : viewPr(pullRefOf(pr), forgeSource()).pr.base;
-  const dir = join(artifactsDir(), 'pre-review');
-  mkdirSync(dir, { recursive: true });
   fetchBase(process.cwd(), base);
   if (git(['rev-list', '--count', `origin/${base}..HEAD`]) === '0') {
-    emit({ head, clean: 'true', blocking: 0, review: '', summary: `no commits beyond origin/${base}; nothing to review` });
+    emit({ head, clean: 'true', blocking: 0, review: '', summary: `no commits beyond origin/${base}; nothing to review`, round });
     return;
   }
   const result = runCodexReview(head, {
@@ -89,6 +91,7 @@ function review(): void {
     blocking,
     review: path,
     summary: summaryLine(head, result.findings, result.assessment),
+    round,
   });
 }
 

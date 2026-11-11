@@ -48,7 +48,16 @@ function findPr(): string {
   return closing.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.url ?? '';
 }
 
-const pr = findPr();
+/** publish answered `published: "false"`: the lap delivered nothing, whatever pull request the prose names. */
+function unpublished(): boolean {
+  try {
+    const value = JSON.parse(trimmed(process.env.INPUTS_PUBLISH) || '{}') as { published?: unknown };
+    return value.published === 'false';
+  } catch {
+    return false;
+  }
+}
+const pr = unpublished() ? '' : findPr();
 if (pr === '') {
   emit({ pr: '', head: '', base: '', files: '', started });
 } else {

@@ -17,8 +17,8 @@ subject:
   base: main
   files: "app/notes.py"
   started: "1700000000000"
-pre-review: { head: "def5678", clean: "true", blocking: 0, review: "/fixture/pre-review/def5678.json", summary: "stub: Codex pre-push review of def5678: approve, 0 advisory note(s)." }
-publish: { pr: "https://github.com/example/app/pull/7", head: "def5678" }
+pre-review: { head: "def5678", clean: "true", blocking: 0, review: "/fixture/pre-review/def5678.json", summary: "stub: Codex pre-push review of def5678: approve, 0 advisory note(s).", round: "1" }
+publish: { pr: "https://github.com/example/app/pull/7", head: "def5678", published: "true", reason: "stub: pushed after a clean review" }
 check-app:
   pr: "https://github.com/example/app/pull/7"
   head: "def5678"

@@ -324,7 +324,8 @@ describe('loop wiring', () => {
     expect(node('gate')).toContain('script: pre-review');
     expect(node('gate')).toContain('command: loop-fix');
     expect(node('publish')).toContain('depends_on: [gate]');
-    expect(node('publish')).not.toContain('trigger_rule: all_done');
+    expect(node('publish')).toContain('trigger_rule: all_done');
+    expect(node('publish')).toContain('published: { type: string, enum: ["true", "false"] }');
     const pick = readFileSync(resolve(pack, 'loop/commands/loop-pick.md'), 'utf8');
     expect(pick).toContain('that unblocks the most other open work');
     expect(pick).toContain('asked for no code change (only the record, the evidence, or merging the default branch) is `light`');

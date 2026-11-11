@@ -131,6 +131,8 @@ nodes:
       until_bash: |
         value=$pre-review.output.clean
         test "$value" = "true"
+      # Three reviews: the builder's commit and up to two corrections. The third review
+      # schedules no correction, since no review would follow it.
       max_iterations: 3
       fresh_context: true
       nodes:
@@ -149,25 +151,27 @@ nodes:
               blocking: { type: integer }
               review: { type: string }
               summary: { type: string }
-            required: [head, clean, blocking, review, summary]
+              round: { type: string }
+            required: [head, clean, blocking, review, summary, round]
         - id: fix
           command: loop-fix
           context: fresh
           idle_timeout: 2700000
           depends_on: [pre-review]
-          when: "$pre-review.output.clean == 'false'"
+          when: "$pre-review.output.clean == 'false' && $pre-review.output.round != '3'"
           with:
             review: "$pre-review.output.review"
             builder: "$build.output"
             target: "$pick.output.target"
             runtime: "$INPUTS.runtime"
 
-  # Runs only after the gate completed: a Codex or correction failure leaves the commit
-  # unpushed, and a resume reviews it again.
+  # Runs whatever the gate did and says whether it published: a failed gate (Codex down,
+  # or three rounds still blocking) leaves the commit unpushed and the lap delivers nothing.
   - id: publish
     script: publish
     runtime: bun
     depends_on: [gate]
+    trigger_rule: all_done
     when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
     with:
       builder: "$build.output"
@@ -178,7 +182,9 @@ nodes:
       properties:
         pr: { type: string }
         head: { type: string }
-      required: [pr, head]
+        published: { type: string, enum: ["true", "false"] }
+        reason: { type: string }
+      required: [pr, head, published, reason]
 
   # Complex work: the full shipping pipeline (triage, investigate or plan,
   # implement, multi-lens review, CI) up to a ready pull request. Ordered after

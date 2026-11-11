@@ -121,6 +121,10 @@ function publish(): void {
     if (kept !== upstream) throw new Error(`the builder reports ${kept}, but this move continues ${upstream}; nothing is written`);
     const ref = pullRefOf(kept);
     const current = viewPr(ref, source);
+    if (current.pr.state !== 'open') {
+      emit({ pr: '', head, published: 'false', reason: `${kept} is ${current.pr.state}; nothing is written to it` });
+      return;
+    }
     const body = readIf(join(files, 'body.md'));
     if (body !== undefined && body !== current.body) {
       const bodyPath = join(artifactsDir(), 'pull-request-body.md');
@@ -155,6 +159,11 @@ function publish(): void {
   let url = upstream || reported || findOpenPrByHead(repo, repo, branch, source)?.pr.url || '';
   if (url !== '') {
     const existing = viewPr(pullRefOf(url), source).pr;
+    // A pull request merged or closed while Codex reviewed gets no push: its branch is history now.
+    if (existing.state !== 'open') {
+      emit({ pr: '', head, published: 'false', reason: `${url} is ${existing.state}; the reviewed commit was not pushed` });
+      return;
+    }
     if (existing.head_repo !== null && (existing.head_repo.host.toLowerCase() !== repo.host || existing.head_repo.path.toLowerCase() !== repo.path.toLowerCase())) {
       throw new Error(`${url} has its head in ${existing.head_repo.path}; this loop pushes to origin only`);
     }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
-import { repoOfOrigin, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
+import { repoOfOrigin } from '../../workflows/sdlc/.shared/builder-report';
+import { reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
 

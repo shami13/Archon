@@ -14,7 +14,7 @@
  */
 import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { rawLine, reportLine } from '../../.shared/builder-report.ts';
+import { rawLine, reportLine, repoOfOrigin } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
 import { pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource } from '../../.shared/forge.ts';
@@ -71,8 +71,17 @@ function review(): void {
   // A correction round commits on top of the builder's commit, so HEAD is that commit or a descendant of it.
   const descends = Bun.spawnSync(['git', 'merge-base', '--is-ancestor', committed, 'HEAD'], { stdout: 'ignore', stderr: 'ignore' });
   if (descends.exitCode !== 0) throw new Error(`HEAD ${head.slice(0, 7)} does not contain the builder's COMMIT ${committed.slice(0, 7)}`);
-  // A continued pull request may merge into a branch other than the default one; review against that.
-  const base = pr === '' ? defaultBranch() : viewPr(pullRefOf(pr), forgeSource()).pr.base;
+  // A continued pull request may merge into a branch other than the default one; review against that. Its base
+  // repository must be origin itself, or origin/<base> would not be the base the pull request diffs against.
+  let base = defaultBranch();
+  if (pr !== '') {
+    const existing = viewPr(pullRefOf(pr), forgeSource()).pr;
+    const origin = repoOfOrigin(git(['remote', 'get-url', 'origin']));
+    if (existing.repo.host.toLowerCase() !== origin.host || existing.repo.path.toLowerCase() !== origin.path.toLowerCase()) {
+      throw new Error(`${pr} merges into ${existing.repo.path}, but origin is ${origin.path}; this loop reviews against origin only`);
+    }
+    base = existing.base;
+  }
   fetchBase(process.cwd(), base);
   if (git(['rev-list', '--count', `origin/${base}..HEAD`]) === '0') {
     emit({ head, clean: 'true', blocking: 0, review: '', summary: `no commits beyond origin/${base}; nothing to review`, round });

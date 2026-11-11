@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
+import { rawLine, reportLine, repoOfOrigin, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource, type ForgeSource, type QualifiedPr } from '../../.shared/forge.ts';
@@ -45,29 +45,6 @@ function leaveComment(ref: QualifiedPr, source: ForgeSource): void {
   upsertComment(ref, marker, path, source);
 }
 
-/** The repository origin points at, host included, from an https, ssh:// or scp-style remote. */
-export function repoOfOrigin(remote: string): QualifiedPr['repo'] {
-  const value = remote.trim();
-  const scp = /^(?:[^@/]+@)?([^/:]+):([^/].*)$/.exec(value);
-  let host: string;
-  let path: string;
-  if (scp !== null && !value.includes('://')) {
-    [, host, path] = scp as unknown as [string, string, string];
-  } else {
-    let url: URL;
-    try {
-      url = new URL(value);
-    } catch {
-      throw new Error('origin is not a repository URL this loop can publish to');
-    }
-    host = url.hostname;
-    path = url.pathname.replace(/^\/+/, '');
-  }
-  path = path.replace(/\/+$/, '').replace(/\.git$/, '');
-  // The URL stays out of the message: a remote may carry a credential.
-  if (host === '' || !/^[^/]+\/[^/]+$/.test(path)) throw new Error('origin is not a repository URL this loop can publish to');
-  return { host: host.toLowerCase(), path };
-}
 
 /** What the body says about the review: its summary line, plus any blocking finding it still names. */
 export function reviewSection(review: CodexReview): string {
@@ -114,7 +91,8 @@ function publish(): void {
     // nothing; a continued pull request that needed only its body, comment or ready state still gets those.
     const kept = reportLine(builder, 'PR');
     if (upstream === '' || kept === undefined) {
-      emit({ pr: upstream, head, published: upstream === '' ? 'false' : 'true', reason: 'the builder committed nothing' });
+      // No commit and no retained pull request: the builder gave the move up, so this lap delivered nothing.
+      emit({ pr: '', head, published: 'false', reason: 'the builder committed nothing and retained no pull request' });
       return;
     }
     // The writes go to the pull request this move continues, never to one the report happens to name.

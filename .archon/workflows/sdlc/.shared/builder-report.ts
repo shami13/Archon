@@ -57,3 +57,27 @@ export function withCodexReviewSection(body: string, section: string): string {
   const after = lines.slice(end).join('\n');
   return `${before === '' ? '' : `${before}\n`}${block}${after === '' ? '' : `\n${after}`}`;
 }
+
+/** The repository origin points at, host included, from an https, ssh:// or scp-style remote. */
+export function repoOfOrigin(remote: string): { host: string; path: string } {
+  const value = remote.trim();
+  const scp = /^(?:[^@/]+@)?([^/:]+):([^/].*)$/.exec(value);
+  let host: string;
+  let path: string;
+  if (scp !== null && !value.includes('://')) {
+    [, host, path] = scp as unknown as [string, string, string];
+  } else {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new Error('origin is not a repository URL this loop can publish to');
+    }
+    host = url.hostname;
+    path = url.pathname.replace(/^\/+/, '');
+  }
+  path = path.replace(/\/+$/, '').replace(/\.git$/, '');
+  // The URL stays out of the message: a remote may carry a credential.
+  if (host === '' || !/^[^/]+\/[^/]+$/.test(path)) throw new Error('origin is not a repository URL this loop can publish to');
+  return { host: host.toLowerCase(), path };
+}

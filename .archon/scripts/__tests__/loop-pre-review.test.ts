@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { CodexFinding, CodexReview } from '../../workflows/sdlc/.shared/codex-review';
 import { summaryLine } from '../../workflows/sdlc/loop/scripts/pre-review';
-import { repoOfOrigin, sshProbeArgs } from '../../workflows/sdlc/.shared/builder-report';
+import { canonicalRepoOfOrigin, gitSshCommand, repoOfOrigin, sshProbeArgs } from '../../workflows/sdlc/.shared/builder-report';
 import { abandonedContinuation, refuseBaseBranch, reviewSection } from '../../workflows/sdlc/loop/scripts/publish';
 
 const HEAD = 'a'.repeat(40);
@@ -75,5 +75,26 @@ describe('sshProbeArgs', () => {
     expect(sshProbeArgs('git@work-forge:owner/repo.git', 'work-forge')).toEqual(['-G', '-l', 'git', 'work-forge']);
     expect(sshProbeArgs('ssh://deploy@github.com:22/example/app.git', 'github.com')).toEqual(['-G', '-l', 'deploy', 'github.com']);
     expect(sshProbeArgs('work-forge:owner/repo', 'work-forge')).toEqual(['-G', 'work-forge']);
+  });
+});
+
+describe('gitSshCommand', () => {
+  it('prefers GIT_SSH_COMMAND, then GIT_SSH, then ssh, splitting shell text into words', () => {
+    expect(gitSshCommand({ GIT_SSH_COMMAND: 'ssh -o "HostName=github.com"', GIT_SSH: '/x/ssh' })).toEqual(['ssh', '-o', 'HostName=github.com']);
+    expect(gitSshCommand({ GIT_SSH: '/x/ssh' })).toEqual(['/x/ssh']);
+    expect(gitSshCommand({})).toEqual(['ssh']);
+  });
+});
+
+describe('canonicalRepoOfOrigin', () => {
+  it('resolves an alias through the ssh command Git itself would run', () => {
+    const before = process.env.GIT_SSH_COMMAND;
+    process.env.GIT_SSH_COMMAND = 'ssh -o HostName=github.com';
+    try {
+      expect(canonicalRepoOfOrigin('git@review-work-alias:example/repo.git')).toEqual({ host: 'github.com', path: 'example/repo' });
+    } finally {
+      if (before === undefined) delete process.env.GIT_SSH_COMMAND;
+      else process.env.GIT_SSH_COMMAND = before;
+    }
   });
 });

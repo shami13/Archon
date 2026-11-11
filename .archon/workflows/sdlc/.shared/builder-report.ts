@@ -105,9 +105,29 @@ export function repoOfOrigin(remote: string): { host: string; path: string } {
 export function canonicalRepoOfOrigin(remote: string): { host: string; path: string } {
   const repo = repoOfOrigin(remote);
   if (/^https?:\/\//.test(remote.trim())) return repo;
-  const probe = Bun.spawnSync(['ssh', ...sshProbeArgs(remote, repo.host)], { stdout: 'pipe', stderr: 'ignore' });
+  // Git's own ssh command, so an alias or option it carries (-o HostName=...) counts here as it does for the push.
+  const probe = Bun.spawnSync(['sh', '-c', 'exec "$0" "$@"', ...gitSshCommand(), ...sshProbeArgs(remote, repo.host)], { stdout: 'pipe', stderr: 'ignore' });
   const hostname = /^hostname (\S+)$/m.exec(probe.stdout.toString())?.[1];
   return hostname === undefined || probe.exitCode !== 0 ? repo : { host: forgeHost(hostname), path: repo.path };
+}
+
+/**
+ * The command Git connects with, as argv words for `sh -c`: GIT_SSH_COMMAND, else core.sshCommand,
+ * else GIT_SSH, else plain ssh. The first two are shell text, so they are expanded by a shell word
+ * split; the legacy GIT_SSH is one program path.
+ */
+export function gitSshCommand(env: NodeJS.ProcessEnv = process.env): string[] {
+  const shell = (text: string): string[] => {
+    const words = Bun.spawnSync(['sh', '-c', `for w in ${text}; do printf '%s\\0' "$w"; done`], { stdout: 'pipe', stderr: 'ignore' });
+    return words.stdout.toString().split('\0').filter(word => word !== '');
+  };
+  const command = env.GIT_SSH_COMMAND?.trim();
+  if (command) return shell(command);
+  const configured = Bun.spawnSync(['git', 'config', '--get', 'core.sshCommand'], { stdout: 'pipe', stderr: 'ignore' });
+  const value = configured.stdout.toString().trim();
+  if (configured.exitCode === 0 && value !== '') return shell(value);
+  const legacy = env.GIT_SSH?.trim();
+  return legacy ? [legacy] : ['ssh'];
 }
 
 /**

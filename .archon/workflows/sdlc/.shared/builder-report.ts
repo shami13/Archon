@@ -25,10 +25,12 @@ export const CODEX_REVIEW_HEADING = '## Codex review';
  */
 export function withCodexReviewSection(body: string, section: string): string {
   const block = `${CODEX_REVIEW_HEADING}\n\n${section.trim()}\n`;
-  const start = body.indexOf(CODEX_REVIEW_HEADING);
-  if (start === -1) return `${body.replace(/\s+$/, '')}\n\n${block}`;
-  const rest = body.slice(start + CODEX_REVIEW_HEADING.length);
-  const next = rest.search(/^## /m);
-  const end = next === -1 ? body.length : start + CODEX_REVIEW_HEADING.length + next;
+  // The heading on a line of its own; a mention of it in prose is not a section.
+  const heading = new RegExp(`^${CODEX_REVIEW_HEADING}[ \\t]*$`, 'm').exec(body);
+  if (heading === null) return `${body.replace(/\s+$/, '')}\n\n${block}`;
+  const start = heading.index;
+  const after = start + heading[0].length;
+  const next = body.slice(after).search(/^## /m);
+  const end = next === -1 ? body.length : after + next;
   return `${body.slice(0, start)}${block}${next === -1 ? '' : '\n'}${body.slice(end)}`;
 }

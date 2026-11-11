@@ -56,7 +56,9 @@ function review(): void {
     emit({ head, clean: 'true', blocking: 0, review: '', summary: 'the builder committed nothing; nothing to review or push' });
     return;
   }
-  if (!head.startsWith(committed)) throw new Error(`HEAD is ${head.slice(0, 7)} but the builder reported COMMIT ${committed.slice(0, 7)}`);
+  // A correction round commits on top of the builder's commit, so HEAD is that commit or a descendant of it.
+  const descends = Bun.spawnSync(['git', 'merge-base', '--is-ancestor', committed, 'HEAD'], { stdout: 'ignore', stderr: 'ignore' });
+  if (descends.exitCode !== 0) throw new Error(`HEAD ${head.slice(0, 7)} does not contain the builder's COMMIT ${committed.slice(0, 7)}`);
   // A continued pull request may merge into a branch other than the default one; review against that.
   const base = pr === '' ? defaultBranch() : viewPr(pullRefOf(pr), forgeSource()).pr.base;
   const dir = join(artifactsDir(), 'pre-review');

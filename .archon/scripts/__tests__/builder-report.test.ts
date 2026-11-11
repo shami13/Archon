@@ -32,6 +32,11 @@ describe('withCodexReviewSection', () => {
     expect(withCodexReviewSection(body, 'new line')).toBe('Closes #5\n\n## Codex review\n\nnew line\n\n## Evidence\n\n- C1: ok\n');
   });
 
+  it('leaves a mention of the heading in prose alone and appends a real section', () => {
+    const body = 'The literal `## Codex review` heading is shown in the UI.\n\nRoll out slowly.\n\n## Evidence\n\n- C1: ok\n';
+    expect(withCodexReviewSection(body, 'new')).toBe(`${body}\n## Codex review\n\nnew\n`);
+  });
+
   it('replaces a trailing section', () => {
     expect(withCodexReviewSection('Body\n\n## Codex review\n\nold\n', 'new')).toBe('Body\n\n## Codex review\n\nnew\n');
   });

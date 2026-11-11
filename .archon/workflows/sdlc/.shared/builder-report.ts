@@ -78,7 +78,8 @@ export function repoOfOrigin(remote: string): { host: string; path: string } {
     } catch {
       throw new Error('origin is not a repository URL this loop can publish to');
     }
-    host = url.hostname;
+    // An http(s) service on another port is another service; ssh ports only choose a transport.
+    host = /^https?:$/.test(url.protocol) ? url.host : url.hostname;
     path = url.pathname.replace(/^\/+/, '');
   }
   path = path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '');

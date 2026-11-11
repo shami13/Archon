@@ -16,7 +16,10 @@ import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { reportLine } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
+import { pullRefOf } from '../../.shared/external-review.ts';
+import { forgeSource } from '../../.shared/forge.ts';
 import { artifactsDir, emit, refuse, trimmed } from '../../.shared/io.ts';
+import { viewPr } from '../../.shared/pr.ts';
 
 const BLOCKING = ['P0', 'P1', 'P2'];
 
@@ -47,7 +50,8 @@ function review(): void {
   const current = git(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (current !== branch) throw new Error(`the checkout is on ${current}, not on the builder's branch ${branch}`);
   const head = git(['rev-parse', 'HEAD']);
-  const base = defaultBranch();
+  // A continued pull request may merge into a branch other than the default one; review against that.
+  const base = pr === '' ? defaultBranch() : viewPr(pullRefOf(pr), forgeSource()).pr.base;
   const dir = join(artifactsDir(), 'pre-review');
   mkdirSync(dir, { recursive: true });
   fetchBase(process.cwd(), base);

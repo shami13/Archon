@@ -316,7 +316,8 @@ export function storeReview(ledger: Ledger, review: CodexReview): void {
   const dir = storeDir(ledger);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${review.head}.json`);
-  const candidate = join(dir, `.${review.head}.${String(process.pid)}.json`);
+  // Not `.json`: history() reads every `.json` in the store, and must not meet a file still being written.
+  const candidate = join(dir, `.${review.head}.${String(process.pid)}.tmp`);
   writeFileSync(candidate, `${JSON.stringify(review, null, 2)}\n`);
   try {
     linkSync(candidate, path);

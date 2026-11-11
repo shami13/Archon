@@ -4,12 +4,17 @@
  * only lines of the form `KEY: value` are read here.
  */
 
-/** The last `KEY: value` line of the report, or undefined when the report has none. */
+/**
+ * The last `KEY: value` line of the report, or undefined when the report has none or says
+ * `none` (with or without the sentence the builder adds after it). `PR` is a pull request URL
+ * or nothing: the builder's explanation never passes as one.
+ */
 export function reportLine(report: string, key: 'BRANCH' | 'COMMIT' | 'PR'): string | undefined {
-  const pattern = new RegExp(`^${key}:\\s*(.+?)\\s*$`, 'm');
-  const matches = [...report.matchAll(new RegExp(pattern.source, 'gm'))];
+  const matches = [...report.matchAll(new RegExp(`^${key}:[ \\t]*(.+?)[ \\t]*$`, 'gm'))];
   const value = matches[matches.length - 1]?.[1];
-  return value === undefined || value === '' || value === 'none' ? undefined : value;
+  if (value === undefined || value === '' || /^none\b/i.test(value)) return undefined;
+  if (key === 'PR') return /^https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.exec(value)?.[0];
+  return value;
 }
 
 export const CODEX_REVIEW_HEADING = '## Codex review';

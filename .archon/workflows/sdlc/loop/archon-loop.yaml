@@ -160,11 +160,12 @@ nodes:
             target: "$pick.output.target"
             runtime: "$INPUTS.runtime"
 
+  # Runs only after the gate completed: a Codex or correction failure leaves the commit
+  # unpushed, and a resume reviews it again.
   - id: publish
     script: publish
     runtime: bun
     depends_on: [gate]
-    trigger_rule: all_done
     when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
     with:
       builder: "$build.output"

@@ -8,9 +8,15 @@ describe('reportLine', () => {
     expect(reportLine(report, 'COMMIT')).toBe('abc');
   });
 
-  it('treats none and a missing line alike', () => {
+  it('treats none, none with its sentence, and a missing line alike', () => {
     expect(reportLine('PR: none', 'PR')).toBeUndefined();
+    expect(reportLine('PR: none because nothing has been pushed yet', 'PR')).toBeUndefined();
     expect(reportLine('nothing here', 'BRANCH')).toBeUndefined();
+  });
+
+  it('takes a pull request only as its URL', () => {
+    expect(reportLine('PR: https://github.com/example/app/pull/9', 'PR')).toBe('https://github.com/example/app/pull/9');
+    expect(reportLine('PR: the one I opened earlier', 'PR')).toBeUndefined();
   });
 });
 

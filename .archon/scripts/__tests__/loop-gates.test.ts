@@ -319,7 +319,12 @@ describe('loop wiring', () => {
   it('a lap that changes no code checks nothing again, and pick follows the critical path', () => {
     const work = readFileSync(resolve(pack, 'loop/commands/loop-work.md'), 'utf8');
     expect(work).toContain('A run that changes no code runs no checks either');
-    expect(work).toContain('a green CI run on the commit you push is that full run');
+    expect(work).toContain('the loop reviews your commit with Codex first, then pushes it');
+    expect(work).not.toContain('a green CI run on the commit you push');
+    expect(node('gate')).toContain('script: pre-review');
+    expect(node('gate')).toContain('command: loop-fix');
+    expect(node('publish')).toContain('depends_on: [gate]');
+    expect(node('publish')).not.toContain('trigger_rule: all_done');
     const pick = readFileSync(resolve(pack, 'loop/commands/loop-pick.md'), 'utf8');
     expect(pick).toContain('that unblocks the most other open work');
     expect(pick).toContain('asked for no code change (only the record, the evidence, or merging the default branch) is `light`');

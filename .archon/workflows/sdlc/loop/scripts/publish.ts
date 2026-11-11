@@ -39,6 +39,12 @@ function readIf(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
 
+function defaultBranch(): string {
+  const result = Bun.spawnSync(['git', 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { stdout: 'pipe', stderr: 'ignore' });
+  const ref = result.stdout.toString().trim();
+  return ref.startsWith('refs/remotes/origin/') ? ref.slice('refs/remotes/origin/'.length) : 'main';
+}
+
 /** What the body says about the review: the summary, the blocking findings, or that the pushed head has none. */
 export function reviewSection(head: string, review: CodexReview | undefined): string {
   if (review === undefined) return `No Codex pre-push review of ${head.slice(0, 7)} was recorded.`;
@@ -64,8 +70,15 @@ function publish(): void {
   const head = git(['rev-parse', 'HEAD']);
   const reviewPath = join(artifactsDir(), 'pre-review', 'latest.json');
   const review = existsSync(reviewPath) ? (JSON.parse(readFileSync(reviewPath, 'utf8')) as CodexReview) : undefined;
-  const reviewed = review?.head;
-  if (reviewed !== undefined && reviewed !== head) note(`publishing ${head.slice(0, 7)}, which the last pre-push review (${reviewed.slice(0, 7)}) did not read`);
+  const upstream = trimmed(process.env.INPUTS_PR);
+  if (review === undefined) {
+    // The gate reviews nothing when the branch adds no commit; then there is nothing to push either.
+    const base = upstream === '' ? defaultBranch() : viewPr(pullRefOf(upstream), forgeSource()).pr.base;
+    if (git(['rev-list', '--count', `origin/${base}..HEAD`]) !== '0') throw new Error(`no pre-push review of ${head.slice(0, 7)} was recorded; nothing is pushed`);
+    emit({ pr: upstream, head });
+    return;
+  }
+  if (review.head !== head) note(`publishing ${head.slice(0, 7)}, which the last pre-push review (${review.head.slice(0, 7)}) did not read`);
 
   git(['push', '--set-upstream', 'origin', `${branch}:${branch}`]);
 
@@ -93,7 +106,8 @@ function publish(): void {
   } else {
     const ref = pullRefOf(url);
     const current = viewPr(ref, source);
-    writeFileSync(bodyPath, withCodexReviewSection(current.body, section));
+    // The builder writes the whole new body; the current one stands when it wrote none.
+    writeFileSync(bodyPath, withCodexReviewSection(readIf(join(files, 'body.md')) ?? current.body, section));
     editPrBody(ref, bodyPath, source);
     if (current.pr.is_draft) markPrReady(ref, source);
   }

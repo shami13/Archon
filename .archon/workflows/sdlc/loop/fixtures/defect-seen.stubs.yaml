@@ -18,6 +18,8 @@ subject:
   base: main
   files: "app/gate.py"
   started: "1700000000000"
+pre-review: { head: "abc1234", clean: "true", blocking: 0, review: "/fixture/pre-review/abc1234.json", summary: "stub: Codex pre-push review of abc1234: approve, 0 advisory note(s).", round: "1" }
+publish: { pr: "https://github.com/example/app/pull/9", head: "abc1234", published: "true", reason: "stub: pushed after a clean review" }
 check-app:
   pr: "https://github.com/example/app/pull/9"
   head: "abc1234"
@@ -70,7 +72,7 @@ claim:
 release: "released 1 claim(s)"
 fixture:
   expect: completed
-  reached: [pick, claim, build, subject, check-app, evidence, review, release]
+  reached: [pick, claim, build, pre-review, publish, subject, check-app, evidence, review, release]
   resolved-text-contains:
     review: "Overall says PASS over D1"
   inputs:

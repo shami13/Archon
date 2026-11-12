@@ -144,6 +144,20 @@ export function findOpenPrByHead(
   head: string,
   source: ForgeSource
 ): PrView | undefined {
+  return findPrByHead(repo, headRepo, head, source, 'open');
+}
+
+/**
+ * The pull request with this head branch: the open one, or with `all` any state (an open one first).
+ * shortcut: the forge selector knows no state and answers with the open one, upgrade when it does.
+ */
+export function findPrByHead(
+  repo: QualifiedPr['repo'],
+  headRepo: QualifiedPr['repo'],
+  head: string,
+  source: ForgeSource,
+  state: 'open' | 'all'
+): PrView | undefined {
   if (source === 'forge') {
     const value = invokeForge('pr.view', {
       selector: { kind: 'head', repo, headRepo, head },
@@ -158,7 +172,7 @@ export function findOpenPrByHead(
     '--head',
     head,
     '--state',
-    'open',
+    state,
     '--json',
     PR_FIELDS
   );
@@ -169,6 +183,7 @@ export function findOpenPrByHead(
   const matches = rows
     .map(row => ghPrView(repo, row))
     .filter(view => view.pr.head_repo !== null && sameRepo(view.pr.head_repo, headRepo));
+  if (state === 'all') return matches.find(view => view.pr.state === 'open') ?? matches[0];
   if (matches.length > 1) {
     throw new Error(
       `more than one open pull request in ${repo.path} has head ${headRepo.path}:${head}`

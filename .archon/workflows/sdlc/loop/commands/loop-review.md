@@ -101,7 +101,7 @@ regression, weakened test, unapproved change to a check, or scope creep that mat
 file changed; the project's checks pass on the commit you name.
 
 - Merge mode is `$INPUTS.merge`. When it is `auto`, return outcome `merge` with `sha` set to the pull request's head commit you reviewed and checked. You do not merge: the merge gate merges that exact commit if the record holds, and closes the work item when `delivers` is `all`. Never run `gh pr merge` yourself.
-- The gate refuses a commit that does not contain the current default branch, because the merged result would be untested. If the head is behind the default branch (`git rev-list --count <head>..origin/<default>` is above 0) or conflicts with it, merge the default branch into the branch (never rebase or force-push), resolve any conflict, push, run the project's checks on the merge result, and re-run the app-check steps for every criterion whose files the merge touched, saving what you saw. Then name the new head as `sha`. The gate merges that commit on the app check's record only when it is the tested result plus a clean merge of the default branch that touches none of this change's files; otherwise the next lap checks the new head. A conflict you resolved in anything but documentation always gets that re-check; the runtime instructions say how to run the app unattended.
+- The gate refuses a commit that does not contain the current default branch, because the merged result would be untested, and it never merges the default branch in itself: every commit of this loop reaches origin through the builder's pre-push review. If the head is behind the default branch (`git rev-list --count <head>..origin/<default>` is above 0) or conflicts with it, do not merge, resolve a conflict or push yourself: send it back with that one item (merge the default branch into the branch, never rebase or force-push, run the checks on the result); the builder's merge commit passes the pre-push review and the app check before it is pushed.
 - `delivers`: `all` when the pull request delivers the whole work item, `part` when something remains (say what in your comment; the work item stays open), `none` otherwise.
 - When merge mode is anything else, leave an approving comment and return outcome `approved`.
 
@@ -118,6 +118,7 @@ Leave exactly one comment on the pull request (or the work item, when there is n
 ## Never
 
 - Merge the pull request yourself.
+- Push anything to the branch: a merge of the default branch, a conflict resolution or a fix. A commit of yours would reach origin without the pre-push review.
 - Edit or delete a `Loop claim` comment; the loop releases this run's claim after you finish.
 - Kill processes by name. Stop only processes you started, by the process ID you recorded, and stop all of them before you finish. Give every wait a timeout.
 - Move the mouse, type into, focus or show windows on the owner's desktop.

@@ -88,8 +88,8 @@ const treeOf = (commit: string): string => {
 
 let branch = '';
 let alreadyMerged = false;
-let landSha = sha;
-let note = '';
+const landSha = sha;
+const note = '';
 const view = run(['gh', 'pr', 'view', prUrl, '--json', 'number,state,headRefOid,headRefName,baseRefName,isCrossRepository']);
 if (view.code !== 0) {
   refusals.push(`could not read the pull request: ${view.err.trim().slice(0, 200)}`);
@@ -129,30 +129,9 @@ if (view.code !== 0) {
       if (untested !== null) {
         refusals.push(`${untested}; the next lap checks the new head`);
       } else if (baseMoved) {
-        // The base moved after the review. Throwing the lap away for that costs a whole new lap, so
-        // the gate merges the base in itself when the merge is clean and touches none of this
-        // change's files (what was tested stays exactly what lands, plus commits already on the base).
-        const m = withBaseOf(sha);
-        const shared = m.fromBase.filter(file => prFiles.includes(file));
-        if (pr.isCrossRepository || m.tree === '' || shared.length > 0) {
-          const why = m.tree === '' ? 'and conflicts with it' : shared.length > 0 ? `in ${shared.slice(0, 5).join(', ')}, which this change also changes` : '(a fork branch the gate cannot push to)';
-          refusals.push(`${pr.baseRefName} has moved past what was tested ${why}; the next lap re-checks the merge`);
-        } else {
-          const made = run(['git', 'commit-tree', m.tree, '-p', sha, '-p', base, '-m', `Merge ${pr.baseRefName} into ${pr.headRefName} (merge gate: it touches no file of this change)`]);
-          const commit = made.code === 0 ? made.out.trim() : '';
-          // The merge is a new head: pushing one the external review gate would hold
-          // only replaces the head that gate judged with one nothing can merge.
-          const unreviewed = commit === '' ? undefined : externalReviewHold(prUrl, commit);
-          const pushed = commit === '' || unreviewed !== undefined ? null : run(['git', 'push', '--quiet', 'origin', `${commit}:refs/heads/${pr.headRefName}`]);
-          if (unreviewed !== undefined) {
-            refusals.push(`${pr.baseRefName} has moved past the reviewed head, and with the external review gate on the merge gate does not push a merge of it that no external review covers; bring the branch up to date through archon-deliver, whose gate reviews the new head`);
-          } else if (pushed?.code !== 0) {
-            refusals.push(`${pr.baseRefName} has moved past what was tested and the gate could not push the clean merge: ${(pushed?.err ?? made.err).trim().slice(0, 200)}`);
-          } else {
-            landSha = commit;
-            note = ` (the gate merged ${pr.baseRefName} in first: ${m.fromBase.length} file(s) from it, none of this change's)`;
-          }
-        }
+        // Every commit of this loop reaches origin through the builder's pre-push review; a merge the gate
+        // made itself would not. The next lap's builder merges the base in, and that commit is reviewed.
+        refusals.push(`${pr.baseRefName} has moved past the reviewed head; the next lap's builder merges it in, and that merge commit passes the pre-push review before it is pushed`);
       }
     }
   }

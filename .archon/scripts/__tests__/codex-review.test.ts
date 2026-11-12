@@ -11,7 +11,10 @@ import { dirname, join } from 'node:path';
 import { trackTempRoots } from '@archon/paths/test-utils';
 import {
   CODEX_OUTPUT_SCHEMA,
+  codexExecutable,
   observeCodexReview,
+  mcpServerNames,
+  reviewScope,
   parseCodexOutput,
   type CodexObserveOptions,
   type CodexRunner,
@@ -20,6 +23,8 @@ import { Ledger, findingsOf } from '../../workflows/sdlc/.shared/external-review
 import type { QualifiedPr } from '../../workflows/sdlc/.shared/forge';
 import { runPackScript } from './deliver-checks-harness';
 
+// The scripted Codex of these tests is found through PATH; a developer's own pin must not take its place.
+process.env.CODEX_BIN_PATH = '';
 const trackTempRoot = trackTempRoots();
 const REF: QualifiedPr = { repo: { host: 'github.com', path: 'example/repo' }, number: 7 };
 const URL = 'https://github.com/example/repo/pull/7';
@@ -226,7 +231,7 @@ describe('the external review node of the loop', () => {
     mkdirSync(bin);
     writeFileSync(
       join(bin, 'codex'),
-      '#!/bin/sh\nwhile [ "$1" != "--output-last-message" ]; do shift; done\nprintf \'%s\' \'{"findings":[],"assessment":"fine"}\' > "$2"\n',
+      '#!/bin/sh\nif [ "$1" = mcp ]; then printf \'[{"name":"docs"}]\'; exit 0; fi\nwhile [ "$1" != "--output-last-message" ]; do shift; done\nprintf \'%s\' \'{"findings":[],"assessment":"fine"}\' > "$2"\n',
       { mode: 0o755 }
     );
     const state = join(root, 'state');
@@ -283,5 +288,55 @@ describe('the external review node of the loop', () => {
     });
     expect(run.stderr).toBe('');
     expect(JSON.parse(run.stdout)).toMatchObject({ ran: 'false', blocking: 0, reason: expect.stringContaining('already passed') });
+  });
+});
+
+describe('codexExecutable', () => {
+  it('runs codex from PATH without a pin, the pinned file, or codex inside a pinned directory', () => {
+    expect(codexExecutable(undefined)).toBe('codex');
+    expect(codexExecutable('  ')).toBe('codex');
+    expect(codexExecutable('/opt/tools/codex-bin')).toBe('/opt/tools/codex-bin');
+    const dir = mkdtempSync(join(tmpdir(), 'codex-pin-'));
+    expect(codexExecutable(dir)).toBe(join(dir, process.platform === 'win32' ? 'codex.exe' : 'codex'));
+  });
+});
+
+describe('reviewScope', () => {
+  it('turns plugins, apps, skills and every listed MCP server off', () => {
+    expect(reviewScope(['kindly-web-search', 'docs', 'docs'])).toEqual([
+      '-c', 'features.plugins=false',
+      '-c', 'features.apps=false',
+      '-c', 'skills.include_instructions=false',
+      '-c', 'mcp_servers.docs.enabled=false',
+      '-c', 'mcp_servers.kindly-web-search.enabled=false',
+    ]);
+    expect(reviewScope([])).toEqual([
+      '-c', 'features.plugins=false',
+      '-c', 'features.apps=false',
+      '-c', 'skills.include_instructions=false',
+    ]);
+    expect(() => reviewScope(['my.server'])).toThrow('cannot be switched off');
+  });
+
+  it('reads the server names from the codex mcp list output and refuses anything else', () => {
+    expect(mcpServerNames('[{"name":"docs","enabled":true},{"name":"lad","enabled":false}]')).toEqual(['docs', 'lad']);
+    expect(mcpServerNames('[]')).toEqual([]);
+    expect(() => mcpServerNames('{"servers":[]}')).toThrow('did not return a list');
+    expect(() => mcpServerNames('[{"enabled":true}]')).toThrow('without a name');
+    expect(() => mcpServerNames('not json')).toThrow();
+  });
+
+  // The installed Codex, when there is one: the overrides must load and leave every server off.
+  it.skipIf(Bun.which('codex') === null)('is accepted by the installed Codex and disables every configured server', () => {
+    const codex = Bun.which('codex') ?? 'codex';
+    const listed = Bun.spawnSync([codex, 'mcp', 'list', '--json'], { stdout: 'pipe', stderr: 'pipe' });
+    expect(listed.exitCode).toBe(0);
+    const names = mcpServerNames(listed.stdout.toString());
+    const scoped = Bun.spawnSync([codex, ...reviewScope(names), 'mcp', 'list', '--json'], { stdout: 'pipe', stderr: 'pipe' });
+    expect(scoped.stderr.toString()).toBe('');
+    expect(scoped.exitCode).toBe(0);
+    const servers = JSON.parse(scoped.stdout.toString()) as { name: string; enabled: boolean }[];
+    expect(servers.map(server => server.name).sort()).toEqual([...names].sort());
+    expect(servers.filter(server => server.enabled)).toEqual([]);
   });
 });

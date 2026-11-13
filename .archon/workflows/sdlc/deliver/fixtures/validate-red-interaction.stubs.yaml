@@ -53,6 +53,7 @@ validate__result:
   summary: "project gate passes PR A and PR B separately; their exact composition fails"
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: failed
   fail-node: gate-validated

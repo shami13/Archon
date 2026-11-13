@@ -65,6 +65,7 @@ ship__deliver__classify:
     docs: 'stub: no doc-facing changes'
 ship__deliver__resolve-scope: '{"errors":"false"}'
 ship__deliver__gate-ready: '{"gate":"ready"}'
+ship__deliver__external-review-policy: { mode: none }
 ship__deliver__impl__assert-changed: 2 files changed
 ship__deliver__gate-green: '{"gate":"green","red_cause":"","stage":"The implementation","summary":""}'
 ship__deliver__ci-verdict: '{"state":"concluded","detail":"all checks green"}'

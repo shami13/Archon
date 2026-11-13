@@ -117,6 +117,76 @@ nodes:
       reason: "$pick.output.reason"
       runtime: "$INPUTS.runtime"
 
+  # Codex reads the builder's commit before it leaves the checkout. Nothing is pushed
+  # until a review has no blocking finding; a correction round fixes and commits, and
+  # the next round reviews that commit. Three rounds that still block end the group
+  # as failed, so nothing is pushed and the next lap starts over. publish then pushes
+  # exactly the commit the clean review read, opens or updates the pull request with
+  # the review's summary in its body, and keeps the review beside the pull request's
+  # ledger, so the gate after the push reuses it instead of reviewing the head twice.
+  - id: gate
+    depends_on: [build]
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    loop_group:
+      until_bash: |
+        value=$pre-review.output.clean
+        test "$value" = "true"
+      # Three reviews: the builder's commit and up to two corrections. A third correction
+      # gets no review and is never pushed; the group then fails and the lap delivers
+      # nothing. Nothing here counts rounds from files: a resumed group starts at one.
+      max_iterations: 3
+      fresh_context: true
+      nodes:
+        - id: pre-review
+          script: pre-review
+          runtime: bun
+          timeout: 1620000
+          with:
+            builder: "$build.output"
+            pr: "$pick.output.pr"
+            target: "$pick.output.target"
+          output_format:
+            type: object
+            properties:
+              head: { type: string }
+              clean: { type: string, enum: ["true", "false"] }
+              blocking: { type: integer }
+              review: { type: string }
+              summary: { type: string }
+            required: [head, clean, blocking, review, summary]
+        - id: fix
+          command: loop-fix
+          context: fresh
+          idle_timeout: 2700000
+          depends_on: [pre-review]
+          when: "$pre-review.output.clean == 'false'"
+          with:
+            review: "$pre-review.output.review"
+            builder: "$build.output"
+            target: "$pick.output.target"
+            runtime: "$INPUTS.runtime"
+
+  # Runs whatever the gate did and says whether it published: a failed gate (Codex down,
+  # or three rounds still blocking) leaves the commit unpushed and the lap delivers nothing.
+  - id: publish
+    script: publish
+    runtime: bun
+    depends_on: [gate]
+    trigger_rule: all_done
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    with:
+      builder: "$build.output"
+      pr: "$pick.output.pr"
+      target: "$pick.output.target"
+    output_format:
+      type: object
+      properties:
+        pr: { type: string }
+        head: { type: string }
+        published: { type: string, enum: ["true", "false"] }
+        reason: { type: string }
+      required: [pr, head, published, reason]
+
   # Complex work: the full shipping pipeline (triage, investigate or plan,
   # implement, multi-lens review, CI) up to a ready pull request. Ordered after
   # build only so the two never run together; pick makes them exclusive.
@@ -136,12 +206,13 @@ nodes:
   - id: subject
     script: subject
     runtime: bun
-    depends_on: [claim, build, ship]
+    depends_on: [claim, build, publish, ship]
     trigger_rule: all_done
     when: "$pick.output.route != 'none' && $claim.output.held == 'true'"
     with:
       target: "$pick.output.target"
       pr: "$pick.output.pr"
+      publish: { from: "$publish.output", if_skipped: "" }
       builder: { from: "$build.output", if_skipped: "" }
       ship: { from: "$ship.output", if_skipped: "" }
     output_format:
@@ -153,6 +224,32 @@ nodes:
         files: { type: string }
         started: { type: string }
       required: [pr, head, base, files, started]
+
+  # The external review of a loop-built head. archon-deliver's gate reviews a
+  # complex lap's pull request, so this runs on the simple and continue routes
+  # only. With the Codex policy it reads the review publish stored for this head
+  # (the pre-push one) and runs Codex only for a head no review covers, in a
+  # worktree of its own; any other policy answers `ran: false`. The reviewer gives
+  # every blocking finding a disposition, as it does for the app check's lines.
+  - id: external-review
+    script: external-review
+    runtime: bun
+    timeout: 1620000
+    depends_on: [subject]
+    when: "$pick.output.route != 'complex'"
+    with:
+      pr: "$subject.output.pr"
+      head: "$subject.output.head"
+    output_format:
+      type: object
+      properties:
+        ran: { type: string, enum: ["true", "false"] }
+        reason: { type: string }
+        review: { type: string }
+        head: { type: string }
+        blocking: { type: integer }
+        findings: { type: string }
+      required: [ran, reason, review, head, blocking, findings]
 
   # Black-box check: runs the app against the contract and the holdout before it
   # reads any diff, on the pull request merged with the current default branch. Its
@@ -222,7 +319,8 @@ nodes:
     command: loop-review
     context: fresh
     idle_timeout: 2700000
-    depends_on: [check-app, evidence]
+    depends_on: [check-app, evidence, external-review]
+    trigger_rule: none_failed_min_one_success
     with:
       route: "$pick.output.route"
       target: "$pick.output.target"
@@ -235,6 +333,7 @@ nodes:
       app_check: "$check-app.output"
       evidence_ok: "$evidence.output.ok"
       evidence_problems: "$evidence.output.problems"
+      external_review: { from: "$external-review.output", if_skipped: "" }
       runtime: "$INPUTS.runtime"
       merge: "$INPUTS.merge"
       rejections: "$INPUTS.rejections"

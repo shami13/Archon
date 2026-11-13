@@ -8,6 +8,10 @@
  *
  * A pull request that is already merged needs no flip and is reported as such; one
  * that is closed without a merge has no delivery to report and refuses.
+ *
+ * When the external review gate is on, `expected_head` is the head its verdict
+ * covers, and a pull request whose head moved since then refuses: the flip is the
+ * last moment a push after the review could slip into a delivery nobody reviewed.
  */
 import {
   approvalPending,
@@ -18,9 +22,10 @@ import {
 } from '../../.shared/checks.ts';
 import { forgeSource, parseQualifiedPr } from '../../.shared/forge.ts';
 import { markPrReady, viewPr } from '../../.shared/pr.ts';
-import { emit, note, refuse } from '../../.shared/io.ts';
+import { emit, note, refuse, trimmed } from '../../.shared/io.ts';
 
 const boundPr = process.env.INPUTS_PR;
+const expectedHead = trimmed(process.env.INPUTS_EXPECTED_HEAD);
 
 function flipReady(): void {
   try {
@@ -35,6 +40,11 @@ function flipReady(): void {
     if (observed.state === 'closed') {
       refuse('flip-ready: the PR is CLOSED without a merge, so there is no delivery to report.');
       return;
+    }
+    if (expectedHead !== '' && observed.head_revision !== expectedHead) {
+      throw new Error(
+        `the pull request head is ${observed.head_revision ?? 'unknown'}, not ${expectedHead}, the head the external review covered`
+      );
     }
     const read = readPrChecks(pr);
     const state = gateState(read.units, approvalPending(read));

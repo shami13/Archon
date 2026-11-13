@@ -18,6 +18,8 @@ subject:
   base: main
   files: "app/notes.py"
   started: "1700000000000"
+pre-review: { head: "abc1234", clean: "true", blocking: 0, review: "/fixture/pre-review/abc1234.json", summary: "stub: Codex pre-push review of abc1234: approve, 0 advisory note(s).", round: "1" }
+publish: { pr: "https://github.com/example/app/pull/9", head: "abc1234", published: "true", reason: "stub: pushed after a clean review" }
 check-app:
   pr: "https://github.com/example/app/pull/9"
   head: "abc1234"
@@ -55,9 +57,10 @@ claim:
   holder: fixture-run
   reason: "stub: this run holds the work item"
 release: "released 1 claim(s)"
+external-review: { ran: "true", reason: "stub: Codex found nothing that blocks this head", review: "codex-fixturehead", head: "fixturehead", blocking: 0, findings: "/fixture/external-review/findings.json" }
 fixture:
   expect: completed
-  reached: [pick, claim, build, subject, check-app, evidence, review, land, release]
+  reached: [pick, claim, build, pre-review, publish, subject, external-review, check-app, evidence, review, land, release]
   resolved-text-contains:
     build: "Route: simple"
     check-app: "/private/holdout.md"

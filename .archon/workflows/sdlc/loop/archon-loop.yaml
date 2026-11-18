@@ -51,6 +51,12 @@ inputs:
   health:
     default: ""
     description: Trusted health command for archon-deploy; required with deploy.
+  cleanup:
+    default: ""
+    description: >-
+      Optional trusted command run in the run's checkout as its last step, however
+      the run ended, to delete what the lap built and no longer needs (test data,
+      build caches). Empty skips it.
   claim_hours:
     default: "6"
     description: >-
@@ -417,3 +423,21 @@ nodes:
     with:
       target: "$pick.output.target"
       pr: "$pick.output.pr"
+
+  # Delete what this lap built and no longer needs, after everything else finished,
+  # failed or was skipped. A failed cleanup is reported but never fails the run.
+  - id: cleanup
+    depends_on: [release]
+    trigger_rule: all_done
+    when: "$pick.output.route != 'none' && $INPUTS.cleanup != ''"
+    timeout: 600000
+    bash: |
+      if eval "$INPUTS_CLEANUP" >&2; then
+        echo '{"ok":true}'
+      else
+        echo '{"ok":false}'
+      fi
+    output_format:
+      type: object
+      properties: { ok: { type: boolean } }
+      required: [ok]

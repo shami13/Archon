@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `archon-deliver` can require a GitHub Copilot review of the exact pushed head before a delivery is ready. A project opts in with `ARCHON_SDLC_EXTERNAL_REVIEW: copilot` and `ARCHON_SDLC_GITHUB_LOGIN` in its config's `env:`. Copilot's findings run through a correction pass and an independent internal review, at most five times per pull request across restarts and runs; a stale, pending, missing or failed review never passes, every stop fails the run before the ready flip with a report in the run's artifacts, and `archon-merge-queue` and `archon-loop` refuse to merge a head the gate did not pass. Off by default.
+
 ### Changed
 
 - The CLI no longer bundles the server or chat adapters. `archon serve` downloads the version-matched server and web UI on first use, verifies embedded checksums, and runs the server as a child. `--download-only` caches both. (#3644)

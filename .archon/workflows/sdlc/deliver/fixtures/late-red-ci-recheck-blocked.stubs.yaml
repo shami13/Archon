@@ -81,6 +81,7 @@ flip-ready: { pr_url: "https://github.com/example/repo/pull/9" }
 outcome: { pr_url: "https://github.com/example/repo/pull/9", summary: "https://github.com/example/repo/pull/9" }
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: failed
   fail-node: gate-ci-recheck

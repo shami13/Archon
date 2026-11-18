@@ -84,6 +84,7 @@ classify:
     docs: "stub: no doc-facing changes"
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":false}'
+external-review-policy: { mode: none }
 fixture:
   expect: completed
   inputs:

@@ -1,0 +1,85 @@
+# Dry-run fixture: the internal continuation review of a Copilot correction still
+# has blocking findings. external-verified runs for real and refuses, which fails
+# the loop and blocks everything after it: the PR stays draft, nothing after the
+# gate runs, and the durable external review report says why.
+impl__implement:
+  done: true
+  green: true
+  red_cause: ""
+  summary: "stub: implemented and green"
+impl__assert-changed: "3 files changed"
+gate-green: '{"gate":"green","red_cause":"","stage":"The implementation","summary":""}'
+pr__pr: { intent: "/fixture/pr-intent.json" }
+pr__publish: { schemaVersion: 1, repo: { host: "github.com", path: "example/repo" }, number: 2, url: "https://github.com/example/repo/pull/2", head: "fixture-branch", base: "dev", is_draft: true, state: "open", head_repo: { host: "github.com", path: "example/repo" }, head_revision: "fixturehead", base_revision: "fixturebase", maintainer_can_modify: null }
+review__mode: '{"continuation":false,"head":"fixturehead","cursor":"","risks":"fixture-owned-policy","execution":{"path":"review__mode","invocation":{"loopPath":[]}}}'
+review__coverage: { full: true }
+review__scope:
+  # PR diff in scope; head sha stubbed
+  docs: false
+  pr: { repo: { host: "github.com", path: "example/repo" }, number: 2 }
+review__code: "0 findings"
+review__simplify__simplify: { findings: false }
+review__seams: "0 findings"
+shape__simplify: { findings: false }
+review__tests: "0 findings"
+review__review-complete: "settled"
+review__synthesize:
+  ready: true
+  action: none
+  findings_summary: "stub: clean on initial review"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+review__publish:
+  ready: true
+  action: none
+  findings_summary: "stub: clean on initial review"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+gate-ready: '{"ready":"true"}'
+external-review-policy: { mode: copilot }
+ci-probe: '{"state":"concluded","detail":"no checks configured on this repository — nothing to await"}'
+ci-verdict: '{"state":"concluded","detail":"no checks configured on this repository — nothing to await"}'
+ci-attention-route: '{"attention":false,"red_cause":""}'
+flip-ready: { pr_url: "https://github.com/example/repo/pull/2" }
+outcome: { pr_url: "https://github.com/example/repo/pull/2", summary: "https://github.com/example/repo/pull/2" }
+review-policy: { risks: "fixture-owned-policy" }
+classify:
+  tier: full
+  errors: false
+  docs: false
+  reasons:
+    tier: "stub: touches persisted state"
+    errors: "stub: no failure paths"
+    docs: "stub: no doc-facing changes"
+resolve-scope: '{"errors":"false"}'
+file-discoveries: '{"issues":[]}'
+fork: '{"fork":false}'
+final-gate: '{"validate":false}'
+external-observe: { review: "5001", head: "fixturehead", url: "https://github.com/example/repo/pull/2#pullrequestreview-5001", comments: 1 }
+external-triage: { outcome: reviewed, reason: "stub: Copilot found no open issues", overview_findings: [] }
+external-route: { action: correct, corrections: 1 }
+external-fix__implement:
+  done: true
+  green: true
+  red_cause: ""
+  summary: "stub: one Copilot finding fixed with a regression test, one declined with evidence, pushed"
+external-fix__assert-changed: "2 files changed"
+gate-external-fix: '{"gate":"green","red_cause":"","stage":"The external review correction","summary":""}'
+external-recheck__mode: '{"continuation":true,"head":"fixturehead2","cursor":"fixturehead","risks":"fixture-owned-policy","execution":{"path":"external-recheck__mode","invocation":{"loopPath":[]}}}'
+external-recheck__coverage: { full: false }
+external-recheck__scope:
+  docs: false
+  pr: { repo: { host: "github.com", path: "example/repo" }, number: 2 }
+external-recheck__synthesize:
+  ready: false
+  action: correct
+  findings_summary: "stub: continuation over the external findings"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+external-recheck__publish:
+  ready: false
+  action: correct
+  findings_summary: "stub: continuation over the external findings"
+  report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
+fixture:
+  expect: failed
+  fail-node: [external-verified, external-review]
+  reached: [external-recheck__synthesize]
+exec-code: true

@@ -15,7 +15,7 @@ $INPUTS.builder
 ## Do it
 
 - Read the review in full. Fix every P0, P1 and P2 finding on the branch you are on, with a test when the finding names a behaviour. Decline a finding only with evidence that it is wrong or already satisfied, written in `$ARTIFACTS_DIR/pre-review/dispositions.md` under the finding's title; the next review round reads the code, not the dispositions, so a decline must hold on its own. A P3 note is yours to fix or leave.
-- Run the project's checks your change touches; run the full set once on your final commit and save its output in `$ARTIFACTS_DIR` as before. If the change is something a user would see or do, run the app the way a user would and look: $INPUTS.runtime
+- Run the project's checks your change touches, as small as the finding they answer. Do not run the full set again: the builder ran it before the first review, and CI runs it on the head the loop pushes. If the change is something a user would see or do, run the app the way a user would and look: $INPUTS.runtime
 - Commit on the same branch. Do not push, do not open or edit the pull request: the loop reviews the new commit and pushes it. Keep `$ARTIFACTS_DIR/pull-request/body.md` and `comment.md` current with what you changed.
 
 ## Never

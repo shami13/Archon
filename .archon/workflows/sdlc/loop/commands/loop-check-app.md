@@ -80,9 +80,11 @@ you test:
 - Build it and run the app the way a user would, on its real code path rather than a test shortcut. How to run it: $INPUTS.runtime
 - Drive the app through what the runtime instructions provide for that: when they name a driver library or input helpers, use them. Do not copy another run's scripts or expected outputs, and do not use a tool, recording or check that this pull request adds or changes as your evidence for a behaviour: back every behaviour criterion with something you observed through the running app's own input path. Step in batches and cap any single wait at 10 minutes. Run every check in the foreground and wait for it there: when you stop your turn to wait for work left running in the background, your report is due at once, with that work unfinished. A long check should print progress; when one prints nothing for several minutes, look at what it is doing instead of waiting it out. A check that runs longer than one wait is never stopped for time: start it detached the way the runtime instructions describe, and keep waiting for it in bounded foreground waits until it ends. Before running the default branch to show a failure is pre-existing, use results the runtime keeps for that exact default-branch commit, if it keeps any; after a default-branch run, keep yours the same way. When you run the project's full checks, save their complete output in `$ARTIFACTS_DIR`: the reviewer reads it instead of running them again on the same commit.
 - If the builder already ran the project's full checks on exactly the tree you are testing and saved
-  the complete output in `$ARTIFACTS_DIR`, read it instead of running them again. Otherwise use CI on the
-  pull request's head: wait for it with `gh pr checks <n> --watch --fail-fast` for at most 20 minutes, and run
-  the full checks yourself only when CI did not finish or did not run them.
+  the complete output in `$ARTIFACTS_DIR`, read it instead of running them again. Otherwise, when the tree you
+  test is the pull request head's own tree (the head already contains the current default branch), use CI on
+  that head: wait for it with `gh pr checks <n> --watch --fail-fast` for at most 20 minutes. Run the full
+  checks yourself and save their output when you test any other tree (a merge with a default branch the head
+  does not contain), or when CI did not finish or did not run them.
 - Check every contract criterion against the running app, one by one.
 - Probes, as your depth allows: one probe line per attempt. Anything that surprises a user is a
   SURPRISE that names a defect line.

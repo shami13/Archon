@@ -10,6 +10,7 @@ import {
   parseJudgeChanges,
   readAppCheck,
   recordRefusals,
+  refusalDecision,
   shipFailuresInLog,
   untestedMerge,
   type CheckLine,
@@ -371,5 +372,35 @@ describe('loop wiring', () => {
   it('the manager runs the holdouts once per pass, not again each time the default branch moves', () => {
     const manage = readFileSync(resolve(pack, 'manager/commands/manage.md'), 'utf8');
     expect(manage).toContain('When the default branch moves during your pass, do not rerun anything');
+  });
+
+  it('a send-back that only asks to merge the default branch has its own cap, not the send-back cap', () => {
+    const moved = 'main has moved past the reviewed head';
+    expect(refusalDecision([moved], moved)).toBe('base moved');
+    expect(refusalDecision([moved, 'C1 failed'], moved)).toBe('not merged');
+    expect(refusalDecision(['C1 failed'], '')).toBe('not merged');
+
+    expect(node('pick')).toContain('base_moves: "$INPUTS.base_moves"');
+    expect(node('review')).toContain('base_moves: "$INPUTS.base_moves"');
+    const pick = readFileSync(resolve(pack, 'loop/commands/loop-pick.md'), 'utf8');
+    expect(pick).toContain('Count `Loop review: base moved` comments separately and never as send-backs');
+    expect(pick).toContain('or $INPUTS.base_moves base-moved comments, stop retrying it');
+    const review = readFileSync(resolve(pack, 'loop/commands/loop-review.md'), 'utf8');
+    expect(review).toContain('your comment\'s decision is `base moved` instead of `sent back`');
+    expect(review).toContain('if the work item already has $INPUTS.base_moves of them');
+    expect(readFileSync(resolve(pack, 'loop/scripts/land.ts'), 'utf8')).toContain('refusalDecision(refusals, baseMovedReason)');
+  });
+
+  it('the label filter reaches pick, the claim and the launch gate', () => {
+    for (const id of ['pick', 'claim']) {
+      expect(node(id)).toContain('labels_only: "$INPUTS.labels_only"');
+      expect(node(id)).toContain('labels_skip: "$INPUTS.labels_skip"');
+    }
+    expect(readFileSync(resolve(pack, 'loop/commands/loop-pick.md'), 'utf8')).toContain("Skip anything this run's label filter leaves out");
+    for (const script of ['loop/scripts/claim.ts', 'loop/scripts/workable.ts']) {
+      const text = readFileSync(resolve(pack, script), 'utf8');
+      expect(text).toContain('INPUTS_LABELS_ONLY');
+      expect(text).toContain('INPUTS_LABELS_SKIP');
+    }
   });
 });

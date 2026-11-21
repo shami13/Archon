@@ -42,7 +42,28 @@ inputs:
     default: "2"
     description: >-
       How many review send-backs one item may collect before the loop stops
-      retrying and returns it to the owner.
+      retrying and returns it to the owner. A send-back whose only cause is that
+      the head is behind or conflicts with the default branch (`Loop review: base
+      moved`) does not count here; base_moves caps those.
+  base_moves:
+    default: "5"
+    description: >-
+      How many base-moved send-backs and merge-gate refusals (`Loop review: base
+      moved`: nothing to change but merging the default branch in) one item may
+      collect before the loop returns it to the owner, so a branch that conflicts
+      with every new commit on the default branch still stops.
+  labels_only:
+    default: ""
+    description: >-
+      Optional comma-separated label names. When set, the loop works only issues
+      and pull requests carrying at least one of them (a pull request also
+      carries the labels of the issues it closes). Empty: every item.
+  labels_skip:
+    default: ""
+    description: >-
+      Optional comma-separated label names. The loop never works an issue or pull
+      request carrying one of them (a pull request also carries the labels of the
+      issues it closes). Empty: none skipped.
   deploy:
     default: ""
     description: >-
@@ -74,6 +95,9 @@ nodes:
       runtime: "$INPUTS.runtime"
       attempts: "$INPUTS.attempts"
       rejections: "$INPUTS.rejections"
+      base_moves: "$INPUTS.base_moves"
+      labels_only: "$INPUTS.labels_only"
+      labels_skip: "$INPUTS.labels_skip"
       claim_hours: "$INPUTS.claim_hours"
     output_format:
       type: object
@@ -89,7 +113,8 @@ nodes:
 
   # Several runs of this loop may work one repository at once. The claim is the
   # one hard fact between them: the oldest live claim comment on a work item
-  # holds it, and a run that lost the race does no work this lap.
+  # holds it, and a run that lost the race does no work this lap. An item this run's
+  # label filter leaves out is not claimed either, whatever pick chose.
   - id: claim
     script: claim
     runtime: bun
@@ -101,6 +126,8 @@ nodes:
       route: "$pick.output.route"
       area: "$pick.output.area"
       claim_hours: "$INPUTS.claim_hours"
+      labels_only: "$INPUTS.labels_only"
+      labels_skip: "$INPUTS.labels_skip"
     output_format:
       type: object
       properties:
@@ -343,6 +370,7 @@ nodes:
       runtime: "$INPUTS.runtime"
       merge: "$INPUTS.merge"
       rejections: "$INPUTS.rejections"
+      base_moves: "$INPUTS.base_moves"
     output_format:
       type: object
       properties:

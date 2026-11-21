@@ -9,7 +9,8 @@
  * the app check tested (or that plus a clean merge of the default branch that touches none of
  * this change's files).
  * A refusal is posted as `Loop review: not merged`, so the next lap continues with the
- * reasons in hand. The forge is GitHub, through `gh`, like the rest of this loop.
+ * reasons in hand (`Loop review: base moved` when the default branch moving is the only one).
+ * The forge is GitHub, through `gh`, like the rest of this loop.
  * A project with the external review gate on merges only a head that gate passed, which
  * this loop's own builder never records: that work goes through archon-deliver. With the
  * gate on, a moved base is refused rather than merged in, since the merge would be a head
@@ -27,6 +28,7 @@ import {
   parseJudgeChanges,
   readAppCheck,
   recordRefusals,
+  refusalDecision,
   shipFailuresInLog,
   untestedMerge,
 } from '../../.shared/merge-gate.ts';
@@ -86,6 +88,7 @@ const treeOf = (commit: string): string => {
   return out !== null && out.code === 0 ? out.out.trim() : '';
 };
 
+let baseMovedReason = '';
 let branch = '';
 let alreadyMerged = false;
 const landSha = sha;
@@ -131,7 +134,8 @@ if (view.code !== 0) {
       } else if (baseMoved) {
         // Every commit of this loop reaches origin through the builder's pre-push review; a merge the gate
         // made itself would not. The next lap's builder merges the base in, and that commit is reviewed.
-        refusals.push(`${pr.baseRefName} has moved past the reviewed head; the next lap's builder merges it in, and that merge commit passes the pre-push review before it is pushed`);
+        baseMovedReason = `${pr.baseRefName} has moved past the reviewed head; the next lap's builder merges it in, and that merge commit passes the pre-push review before it is pushed`;
+        refusals.push(baseMovedReason);
       }
     }
   }
@@ -149,7 +153,7 @@ if (alreadyMerged) {
   comment(`Loop review: merged (route: ${route}) outside the merge gate. The gate's own checks, for the record:\n\n${list || '- all held'}`);
   emit({ outcome: 'merged', reason: 'the pull request was already merged when the gate ran' });
 } else if (refusals.length > 0) {
-  comment(`Loop review: not merged (route: ${route}). The merge gate refused the reviewer's merge:\n\n${list}\n\nThe next lap continues this pull request.`);
+  comment(`Loop review: ${refusalDecision(refusals, baseMovedReason)} (route: ${route}). The merge gate refused the reviewer's merge:\n\n${list}\n\nThe next lap continues this pull request.`);
   emit({ outcome: 'refused', reason: refusals.join('; ') });
 } else {
   const merged = run(['gh', 'pr', 'merge', prUrl, '--squash', '--match-head-commit', landSha]);

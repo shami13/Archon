@@ -15,6 +15,7 @@ import {
   observeCodexReview,
   mcpServerNames,
   reviewScope,
+  listMcpServers,
   parseCodexOutput,
   type CodexObserveOptions,
   type CodexRunner,
@@ -326,12 +327,11 @@ describe('reviewScope', () => {
     expect(() => mcpServerNames('not json')).toThrow();
   });
 
-  // The installed Codex, when there is one: the overrides must load and leave every server off.
+  // The installed Codex, when there is one: the overrides must load and leave every server off,
+  // including on a host whose Codex plugins supply MCP servers of their own.
   it.skipIf(Bun.which('codex') === null)('is accepted by the installed Codex and disables every configured server', () => {
     const codex = Bun.which('codex') ?? 'codex';
-    const listed = Bun.spawnSync([codex, 'mcp', 'list', '--json'], { stdout: 'pipe', stderr: 'pipe' });
-    expect(listed.exitCode).toBe(0);
-    const names = mcpServerNames(listed.stdout.toString());
+    const names = listMcpServers(process.cwd());
     const scoped = Bun.spawnSync([codex, ...reviewScope(names), 'mcp', 'list', '--json'], { stdout: 'pipe', stderr: 'pipe' });
     expect(scoped.stderr.toString()).toBe('');
     expect(scoped.exitCode).toBe(0);

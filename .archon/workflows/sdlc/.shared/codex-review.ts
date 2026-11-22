@@ -112,13 +112,18 @@ export function mcpServerNames(listing: string): string[] {
   });
 }
 
+/** The switches that turn off every tool source other than named MCP servers. */
+const TOOL_SOURCES_OFF = ['-c', 'features.plugins=false', '-c', 'features.apps=false', '-c', 'skills.include_instructions=false'];
+
 /**
  * The MCP servers Codex itself resolves for a review in `cwd`, read from Codex so every
  * configuration layer counts, not a guess at which files it reads. A listing that cannot
  * be established fails the review: a server it would have named would otherwise stay on.
+ * It is read with plugins and apps already off: a server a plugin supplies is gone then,
+ * and an `enabled=false` override for it would leave Codex a server with no transport.
  */
-function listMcpServers(cwd: string): string[] {
-  const result = Bun.spawnSync([codexExecutable(), 'mcp', 'list', '--json'], { cwd, timeout: 60_000, stdout: 'pipe', stderr: 'pipe' });
+export function listMcpServers(cwd: string): string[] {
+  const result = Bun.spawnSync([codexExecutable(), 'mcp', 'list', '--json', ...TOOL_SOURCES_OFF], { cwd, timeout: 60_000, stdout: 'pipe', stderr: 'pipe' });
   if (result.exitCode !== 0) throw new Error(`codex mcp list --json failed: ${result.stderr.toString().trim()}`);
   return mcpServerNames(result.stdout.toString());
 }
@@ -133,9 +138,7 @@ export function reviewScope(servers: readonly string[]): string[] {
   const unaddressable = servers.find(name => !/^[A-Za-z0-9_-]+$/.test(name));
   if (unaddressable !== undefined) throw new Error(`the MCP server ${JSON.stringify(unaddressable)} cannot be switched off from the command line`);
   return [
-    '-c', 'features.plugins=false',
-    '-c', 'features.apps=false',
-    '-c', 'skills.include_instructions=false',
+    ...TOOL_SOURCES_OFF,
     ...[...new Set(servers)].sort().flatMap(name => ['-c', `mcp_servers.${name}.enabled=false`]),
   ];
 }

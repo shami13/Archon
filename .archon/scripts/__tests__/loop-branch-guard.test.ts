@@ -112,6 +112,19 @@ describe('takeBranch', () => {
     expect(git(lap, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('lap-2');
   });
 
+  it('never moves a branch a worktree took after the check', () => {
+    const { earlier, lap } = repository();
+    const checked = git(earlier, 'rev-parse', 'feat');
+    // The snapshot saw no holder; `earlier` has the branch by the time it moves.
+    const result = moveBranch('feat', checked, [], lap);
+    expect(result.ok).toBe('false');
+    expect(result.reason).toContain('could not be checked out here');
+    expect(git(earlier, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feat');
+    expect(git(earlier, 'rev-parse', 'feat')).toBe(checked);
+    expect(git(earlier, 'status', '--porcelain')).toBe('');
+    expect(git(lap, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('lap-2');
+  });
+
   it('takes a branch nobody holds, at the commit origin has now', () => {
     const { root, earlier, lap } = repository();
     git(earlier, 'checkout', '-q', '--detach');

@@ -46,19 +46,29 @@ function tipOf(branch: string, cwd: string): string {
 }
 
 /**
- * Detach the holders, then move `branch` to origin's commit and check it out here, but only while
- * its tip is still `tip` (empty: the branch must not exist yet). A commit that landed on the branch
- * after the check keeps the branch where it is, and the lap leaves the item. A holder is a run that
- * ended; the claim this lap holds keeps any live run off the branch.
+ * Detach the holders, then take `branch` here with a normal checkout, which git refuses while any
+ * other worktree has it, and only then move it to origin's commit. The move happens only while the
+ * tip is still `tip` (empty: the branch must not exist yet): a commit that landed on the branch
+ * after the check, or a worktree that took it meanwhile, leaves the branch as it is and the lap
+ * leaves the item. A holder is a run that ended; the claim this lap holds keeps live runs away.
  */
 export function moveBranch(branch: string, tip: string, held: readonly string[], cwd: string): { ok: 'true' | 'false'; reason: string } {
   for (const worktree of held) git(worktree, ['checkout', '--quiet', '--detach']);
   const target = git(cwd, ['rev-parse', `refs/remotes/origin/${branch}`]);
-  const swapped = Bun.spawnSync(['git', '-C', cwd, 'update-ref', '-m', 'archon-loop checkout', `refs/heads/${branch}`, target, tip], { stderr: 'pipe' });
-  if (swapped.exitCode !== 0) {
-    return { ok: 'false', reason: `${branch} moved while this lap checked it (now ${tipOf(branch, cwd).slice(0, 7) || 'deleted'}); this lap leaves the item` };
+  const before = git(cwd, ['rev-parse', 'HEAD']);
+  const back = Bun.spawnSync(['git', '-C', cwd, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { stdout: 'pipe' }).stdout.toString().trim() || before;
+  const take = tip === '' ? ['checkout', '--quiet', '-b', branch, `refs/remotes/origin/${branch}`] : ['checkout', '--quiet', branch];
+  const taken = Bun.spawnSync(['git', '-C', cwd, ...take], { stderr: 'pipe' });
+  if (taken.exitCode !== 0) {
+    return { ok: 'false', reason: `${branch} could not be checked out here (${taken.stderr.toString().trim()}); this lap leaves the item` };
   }
-  git(cwd, ['checkout', '--quiet', branch]);
+  const now = git(cwd, ['rev-parse', 'HEAD']);
+  if (tip !== '' && now !== tip) {
+    git(cwd, ['checkout', '--quiet', back]);
+    return { ok: 'false', reason: `${branch} moved while this lap checked it (now ${now.slice(0, 7)}); this lap leaves the item` };
+  }
+  // The branch has nothing origin lacks (checked above) and is ours alone now, so this loses nothing.
+  git(cwd, ['reset', '--quiet', '--keep', target]);
   git(cwd, ['branch', '--quiet', `--set-upstream-to=origin/${branch}`, branch]);
   const detached = held.length > 0 ? `; detached ${held.join(', ')}` : '';
   return { ok: 'true', reason: `checked out ${branch} at ${target.slice(0, 7)}${detached}` };

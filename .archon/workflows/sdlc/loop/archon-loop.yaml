@@ -136,13 +136,33 @@ nodes:
         reason: { type: string }
       required: [held, holder, reason]
 
+  # A continued pull request's branch, checked out here before the builder starts, so the
+  # builder never forces a checkout. Another worktree that has the branch is detached first;
+  # when that branch or worktree holds work no remote has, the lap leaves the item (`ok:
+  # "false"`) and builds, checks and reviews nothing.
+  - id: checkout
+    script: checkout
+    runtime: bun
+    depends_on: [claim]
+    when: "$claim.output.held == 'true' && $pick.output.route == 'continue'"
+    with:
+      pr: "$pick.output.pr"
+    output_format:
+      type: object
+      properties:
+        ok: { type: string, enum: ["true", "false"] }
+        branch: { type: string }
+        reason: { type: string }
+      required: [ok, branch, reason]
+
   # Contained work and finishing an open pull request: the in-loop builder.
   - id: build
     command: loop-work
     context: fresh
     idle_timeout: 2700000
-    depends_on: [claim]
-    when: "$claim.output.held == 'true' && $pick.output.route == 'continue' || $claim.output.held == 'true' && $pick.output.route == 'simple'"
+    depends_on: [claim, checkout]
+    trigger_rule: none_failed_min_one_success
+    when: "$claim.output.held == 'true' && $pick.output.route == 'continue' && $checkout.output.ok == 'true' || $claim.output.held == 'true' && $pick.output.route == 'simple'"
     with:
       route: "$pick.output.route"
       target: "$pick.output.target"
@@ -159,7 +179,7 @@ nodes:
   # ledger, so the gate after the push reuses it instead of reviewing the head twice.
   - id: gate
     depends_on: [build]
-    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
     loop_group:
       until_bash: |
         value=$pre-review.output.clean
@@ -206,7 +226,7 @@ nodes:
     runtime: bun
     depends_on: [gate]
     trigger_rule: all_done
-    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
     with:
       builder: "$build.output"
       pr: "$pick.output.pr"
@@ -239,9 +259,9 @@ nodes:
   - id: subject
     script: subject
     runtime: bun
-    depends_on: [claim, build, publish, ship]
+    depends_on: [claim, checkout, build, publish, ship]
     trigger_rule: all_done
-    when: "$pick.output.route != 'none' && $claim.output.held == 'true'"
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true' || $pick.output.route == 'complex' && $claim.output.held == 'true'"
     with:
       target: "$pick.output.target"
       pr: "$pick.output.pr"
@@ -441,7 +461,8 @@ nodes:
       identity: ""
 
   # Free the work item for the next lap however this run ended: after review and
-  # deploy finished, failed or were skipped.
+  # deploy finished, failed or were skipped. A branch the run's checkout was on that
+  # holds work no remote has keeps the claim live instead, naming that work.
   - id: release
     script: release
     runtime: bun

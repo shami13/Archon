@@ -24,7 +24,7 @@ If the move turns out to be wrong (the pull request was already merged, the issu
 
 ## Do it
 
-- Work on the pull request's own branch, or a new branch from the default branch for a new issue. If git refuses because another worktree has the branch, use `git checkout -B <branch> origin/<branch> --ignore-other-worktrees`.
+- Work on the pull request's own branch, or a new branch from the default branch for a new issue. For `continue` the loop has already checked the pull request's branch out here at origin's commit; stay on it, also when you change nothing, and report it as `BRANCH`. Never force a checkout of a branch another worktree has (`--ignore-other-worktrees`, or `checkout -B` over it): that worktree's commits would be lost. If git refuses one, leave the move as below.
 - Bring a behind or conflicting branch up to date by merging the default branch in, resolving conflicts so both sides' intent survives. Never rebase or force-push.
 - Do the work properly. Stay within what the issue asks, but fix what is genuinely broken in your way. If the existing design is the real problem, say so in a new issue rather than patching around it.
 - Run the project's own checks (the commands in `engineering.md`, the harness config, or the CI workflow). While you work, run what your change touches; run the full set once, on your final commit, and save its complete output in `$ARTIFACTS_DIR` (the app check and the reviewer read it instead of running it again on the same commit). They must pass before you finish. If the change is something a user would see or do, run the app the way a user would and look: $INPUTS.runtime

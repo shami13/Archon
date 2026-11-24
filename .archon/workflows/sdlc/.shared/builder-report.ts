@@ -39,6 +39,15 @@ export function publicationDeclined(report: string): boolean {
   return /^no\b/i.test(rawLine(report, 'PUBLISH') ?? '');
 }
 
+/**
+ * Whether the report asks the loop to push a commit from the checkout: it names one and does not
+ * decline publication. Only then must the checkout be on the report's branch; a move that committed
+ * nothing pushes nothing, whatever branch the checkout is on.
+ */
+export function pushesCommit(report: string): boolean {
+  return !publicationDeclined(report) && reportLine(report, 'COMMIT') !== undefined;
+}
+
 export const CODEX_REVIEW_HEADING = '## Codex review';
 
 /**

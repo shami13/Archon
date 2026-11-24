@@ -78,6 +78,32 @@ describe('takeBranch', () => {
     expect(holders('feat', lap)).toEqual([earlier]);
   });
 
+  it('does not count a commit as saved because a stale remote-tracking ref names it', () => {
+    const { root, earlier, lap } = repository();
+    const kept = commit(earlier, 'fix');
+    git(earlier, 'push', '-q', 'origin', 'HEAD:archive');
+    git(earlier, 'fetch', '-q', 'origin');
+    // Another checkout deletes the branch on origin; this repository still has origin/archive cached.
+    const other = join(root, 'other');
+    git(root, 'clone', '-q', join(root, 'origin.git'), other);
+    git(other, 'push', '-q', 'origin', '--delete', 'archive');
+    git(earlier, 'checkout', '-q', '--detach');
+    const result = takeBranch('feat', lap);
+    expect(result.ok).toBe('false');
+    expect(result.reason).toContain(kept);
+    expect(git(lap, 'rev-parse', '--short', 'feat')).toBe(kept);
+  });
+
+  it('proves nothing saved while origin cannot be listed', () => {
+    const { root, earlier, lap } = repository();
+    git(earlier, 'checkout', '-q', '--detach');
+    git(lap, 'remote', 'set-url', 'origin', join(root, 'gone.git'));
+    const result = takeBranch('feat', lap);
+    expect(result.ok).toBe('false');
+    expect(result.reason).toContain('origin could not be listed');
+    expect(git(lap, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('lap-2');
+  });
+
   it('leaves a branch whose holder has uncommitted changes', () => {
     const { earlier, lap } = repository();
     writeFileSync(join(earlier, 'file.txt'), 'half done');

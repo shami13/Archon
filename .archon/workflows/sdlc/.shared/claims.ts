@@ -18,6 +18,13 @@ type JsonObject = Record<string, unknown>;
 
 export const CLAIM_PREFIX = 'Loop claim: run ';
 
+/**
+ * The note a run's release adds to a claim it keeps because its branch holds work no remote
+ * has. Such a claim stays live after the run ended, until it expires or is released by hand,
+ * so no scheduler treats it as a release the run missed.
+ */
+export const KEPT_NOTE = '\n\nKept as the run ended: ';
+
 export interface WorkItem {
   readonly repository: string;
   readonly number: number;

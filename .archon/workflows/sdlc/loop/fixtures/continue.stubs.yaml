@@ -10,6 +10,7 @@ pick:
   depth: normal
   area: app/
   reason: "stub: review findings outstanding on a loop-owned pull request"
+checkout: { ok: "true", branch: "archon/task-fix-notes", reason: "stub: checked out archon/task-fix-notes at def5678" }
 build: "Fixed the review findings on the open pull request.\nPR: https://github.com/example/app/pull/7"
 subject:
   pr: "https://github.com/example/app/pull/7"
@@ -56,7 +57,7 @@ release: "released 1 claim(s)"
 external-review: { ran: "true", reason: "stub: Codex found nothing that blocks this head", review: "codex-fixturehead", head: "fixturehead", blocking: 0, findings: "/fixture/external-review/findings.json" }
 fixture:
   expect: completed
-  reached: [pick, claim, build, pre-review, publish, subject, external-review, check-app, evidence, review, release]
+  reached: [pick, claim, checkout, build, pre-review, publish, subject, external-review, check-app, evidence, review, release]
   resolved-text-contains:
     build: "https://github.com/example/app/pull/7"
     check-app: "Pull request: https://github.com/example/app/pull/7"

@@ -29,6 +29,12 @@ or until it is more than $INPUTS.claim_hours hours old.
   the two changes touch in different places do not count: the default branch merges in cleanly. When every
   actionable item is claimed or overlaps a claimed area, the route is `none`.
 - A pull request still open from an earlier run whose claim was released is ordinary work for rule 1.
+- Never choose to continue a pull request whose branch holds work only this machine has: run
+  `git worktree list --porcelain`, and when another worktree has the branch checked out with
+  uncommitted changes (`git -C <worktree> status --porcelain`), or the branch has commits no origin
+  ref has (`git rev-list <branch> --not --remotes=origin`), leave it to the run that made that work
+  and say so in `reason`, naming the worktree and the commits. A clean, pushed worktree on the
+  branch is no obstacle: the loop detaches it before the builder starts.
 
 After you choose, the loop claims the item for you; if another run claimed it in the same
 moment, the oldest claim keeps it and this run does nothing. You never write claim comments

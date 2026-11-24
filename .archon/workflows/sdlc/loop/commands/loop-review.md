@@ -54,7 +54,7 @@ cap. On the simple and continue routes, do the same with the builder's report.
 
 ## Look
 
-- Check out the pull request's head (if another worktree holds the branch, `git checkout -B <branch> origin/<branch> --ignore-other-worktrees`) and note the commit.
+- Check out the pull request's head detached, never its branch (another worktree may hold the branch): `git fetch origin pull/<n>/head` and `git checkout --detach FETCH_HEAD`. Note the commit.
 - Read the work item and its `Contract` comment, the full diff, and the builder's latest comment. Read `engineering.md` and the product document for what the project expects, and the product document's rules for the area this change touches.
 - Look for: real bugs and regressions (anything a user sees that is worse than on the default branch, anywhere, is a regression of this change and blocks even when every criterion passes; never accept one as a side effect); scope creep beyond the work item; tests disabled, skipped, loosened or deleted to get green; edits to protected files (the harness and its scenarios, the CI workflows, the mission, the product document, and any path `engineering.md` or the harness config lists as protected); anything the app check marked FAIL, INCOMPLETE or SURPRISE, and every defect line.
 - A change the work item did not ask for ("while I was here", "an extra change") is checked against the product document's rules for that area like any other change. It is scope creep unless the work item or the product document calls for it.

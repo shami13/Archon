@@ -15,7 +15,8 @@ import { trackTempRoots } from '@archon/paths/test-utils';
 import { CLAIM_PREFIX } from '../../workflows/sdlc/.shared/claims';
 import { pushesCommit } from '../../workflows/sdlc/.shared/builder-report';
 import { holders } from '../../workflows/sdlc/.shared/held-branch';
-import { takeBranch } from '../../workflows/sdlc/loop/scripts/checkout';
+import { workability } from '../../workflows/sdlc/.shared/workable';
+import { moveBranch, takeBranch } from '../../workflows/sdlc/loop/scripts/checkout';
 import { keptClaim, leftBehind } from '../../workflows/sdlc/loop/scripts/release';
 
 const trackTempRoot = trackTempRoots();
@@ -100,6 +101,17 @@ describe('takeBranch', () => {
     expect(holders('feat', lap)).toEqual([]);
   });
 
+  it('keeps the branch where it is when a commit lands on it after the check', () => {
+    const { earlier, lap } = repository();
+    const checked = git(earlier, 'rev-parse', 'feat');
+    const late = commit(earlier, 'late fix');
+    const result = moveBranch('feat', checked, [earlier], lap);
+    expect(result.ok).toBe('false');
+    expect(result.reason).toContain('feat moved while this lap checked it');
+    expect(git(lap, 'rev-parse', '--short', 'feat')).toBe(late);
+    expect(git(lap, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('lap-2');
+  });
+
   it('takes a branch nobody holds, at the commit origin has now', () => {
     const { root, earlier, lap } = repository();
     git(earlier, 'checkout', '-q', '--detach');
@@ -137,6 +149,28 @@ describe('release', () => {
     const second = keptClaim(first, 'feat has 2 commit(s) no origin ref has: 9aa1111, 4f75080');
     expect(second).toContain('9aa1111');
     expect(second.match(/Kept as the run ended/g)).toHaveLength(1);
+  });
+});
+
+describe('the launch gate', () => {
+  it('leaves a kept claim of an ended run live instead of releasing it', () => {
+    const now = Date.now();
+    const comment = (body: string): { body: string; createdAt: string; url: string } => ({
+      body,
+      createdAt: new Date(now - 3_600_000).toISOString(),
+      url: 'https://github.com/example/app/issues/3#issuecomment-1',
+    });
+    const kept = keptClaim(`${CLAIM_PREFIX}run-1\n\nRoute: simple`, 'feat has 1 commit(s) no origin ref has: 4f75080');
+    const board = (body: string): Parameters<typeof workability>[0] => ({
+      issues: [{ number: 3, title: 'item', body: '', labels: [], comments: [comment(body)] }],
+      pulls: [],
+    });
+    const result = workability(board(kept), 6, now, new Set(['run-1']));
+    expect(result.ended).toEqual([]);
+    expect(result.claims).toEqual([{ kind: 'issue', number: 3, run: 'run-1' }]);
+    expect(result.workable).toEqual([]);
+    // A claim the run never released is still a missed release.
+    expect(workability(board(`${CLAIM_PREFIX}run-1\n\nRoute: simple`), 6, now, new Set(['run-1'])).ended).toHaveLength(1);
   });
 });
 

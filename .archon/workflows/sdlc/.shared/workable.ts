@@ -11,7 +11,7 @@
  * workable, so the gate can only skip laps that would have picked nothing.
  */
 
-import { CLAIM_PREFIX } from './claims.ts';
+import { CLAIM_PREFIX, KEPT_NOTE } from './claims.ts';
 
 export interface BoardComment {
   readonly body: string;
@@ -127,7 +127,8 @@ export function liveClaimComments(
 /**
  * The board as a lap would find it. `endedRuns` are runs the scheduler knows have
  * finished, failed or been cancelled: a run killed before its release step never frees
- * its item, so its claim is treated as dead here and returned in `ended` for release.
+ * its item, so its claim is treated as dead here and returned in `ended` for release. A
+ * claim its run's release kept (`KEPT_NOTE`) stays live.
  */
 export function workability(
   board: Board,
@@ -147,7 +148,8 @@ export function workability(
   ] as const) {
     for (const item of items) {
       for (const { run, comment } of liveClaimComments(item.comments, expiryHours, now)) {
-        if (endedRuns.has(run)) {
+        // A claim the run's release kept guards that run's unpushed work: it is live, not a missed release.
+        if (endedRuns.has(run) && !comment.body.includes(KEPT_NOTE)) {
           if (comment.url) ended.push({ kind, number: item.number, run, url: comment.url });
           continue;
         }

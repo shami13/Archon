@@ -13,15 +13,13 @@
  * - INPUTS_TARGET, INPUTS_PR: the work item and the pull request the move continued.
  */
 
-import { CLAIM_PREFIX, comments, editComment, workItem } from '../../.shared/claims.ts';
+import { CLAIM_PREFIX, KEPT_NOTE, comments, editComment, workItem } from '../../.shared/claims.ts';
 import { unsavedWork, visitedBranches } from '../../.shared/held-branch.ts';
 import { report, trimmed } from '../../.shared/io.ts';
 
-const KEPT = '\n\nKept as the run ended: ';
-
 /** The claim body that stays live and names the work it keeps; a resumed run's earlier note is replaced. */
 export function keptClaim(body: string, unsaved: string): string {
-  return `${body.split(KEPT, 1)[0]}${KEPT}${unsaved}. Resume the run, or push or discard that work, then edit this comment to start with \`Loop claim released\`.`;
+  return `${body.split(KEPT_NOTE, 1)[0]}${KEPT_NOTE}${unsaved}. Resume the run, or push or discard that work, then edit this comment to start with \`Loop claim released\`.`;
 }
 
 /** What the run's checkout leaves that no remote has, or undefined when its claim can be released. */

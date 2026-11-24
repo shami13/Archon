@@ -42,7 +42,28 @@ inputs:
     default: "2"
     description: >-
       How many review send-backs one item may collect before the loop stops
-      retrying and returns it to the owner.
+      retrying and returns it to the owner. A send-back whose only cause is that
+      the head is behind or conflicts with the default branch (`Loop review: base
+      moved`) does not count here; base_moves caps those.
+  base_moves:
+    default: "5"
+    description: >-
+      How many base-moved send-backs and merge-gate refusals (`Loop review: base
+      moved`: nothing to change but merging the default branch in) one item may
+      collect before the loop returns it to the owner, so a branch that conflicts
+      with every new commit on the default branch still stops.
+  labels_only:
+    default: ""
+    description: >-
+      Optional comma-separated label names. When set, the loop works only issues
+      and pull requests carrying at least one of them (a pull request also
+      carries the labels of the issues it closes). Empty: every item.
+  labels_skip:
+    default: ""
+    description: >-
+      Optional comma-separated label names. The loop never works an issue or pull
+      request carrying one of them (a pull request also carries the labels of the
+      issues it closes). Empty: none skipped.
   deploy:
     default: ""
     description: >-
@@ -74,6 +95,9 @@ nodes:
       runtime: "$INPUTS.runtime"
       attempts: "$INPUTS.attempts"
       rejections: "$INPUTS.rejections"
+      base_moves: "$INPUTS.base_moves"
+      labels_only: "$INPUTS.labels_only"
+      labels_skip: "$INPUTS.labels_skip"
       claim_hours: "$INPUTS.claim_hours"
     output_format:
       type: object
@@ -89,7 +113,8 @@ nodes:
 
   # Several runs of this loop may work one repository at once. The claim is the
   # one hard fact between them: the oldest live claim comment on a work item
-  # holds it, and a run that lost the race does no work this lap.
+  # holds it, and a run that lost the race does no work this lap. An item this run's
+  # label filter leaves out is not claimed either, whatever pick chose.
   - id: claim
     script: claim
     runtime: bun
@@ -101,6 +126,8 @@ nodes:
       route: "$pick.output.route"
       area: "$pick.output.area"
       claim_hours: "$INPUTS.claim_hours"
+      labels_only: "$INPUTS.labels_only"
+      labels_skip: "$INPUTS.labels_skip"
     output_format:
       type: object
       properties:
@@ -109,13 +136,33 @@ nodes:
         reason: { type: string }
       required: [held, holder, reason]
 
+  # A continued pull request's branch, checked out here before the builder starts, so the
+  # builder never forces a checkout. Another worktree that has the branch is detached first;
+  # when that branch or worktree holds work no remote has, the lap leaves the item (`ok:
+  # "false"`) and builds, checks and reviews nothing.
+  - id: checkout
+    script: checkout
+    runtime: bun
+    depends_on: [claim]
+    when: "$claim.output.held == 'true' && $pick.output.route == 'continue'"
+    with:
+      pr: "$pick.output.pr"
+    output_format:
+      type: object
+      properties:
+        ok: { type: string, enum: ["true", "false"] }
+        branch: { type: string }
+        reason: { type: string }
+      required: [ok, branch, reason]
+
   # Contained work and finishing an open pull request: the in-loop builder.
   - id: build
     command: loop-work
     context: fresh
     idle_timeout: 2700000
-    depends_on: [claim]
-    when: "$claim.output.held == 'true' && $pick.output.route == 'continue' || $claim.output.held == 'true' && $pick.output.route == 'simple'"
+    depends_on: [claim, checkout]
+    trigger_rule: none_failed_min_one_success
+    when: "$claim.output.held == 'true' && $pick.output.route == 'continue' && $checkout.output.ok == 'true' || $claim.output.held == 'true' && $pick.output.route == 'simple'"
     with:
       route: "$pick.output.route"
       target: "$pick.output.target"
@@ -132,7 +179,7 @@ nodes:
   # ledger, so the gate after the push reuses it instead of reviewing the head twice.
   - id: gate
     depends_on: [build]
-    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
     loop_group:
       until_bash: |
         value=$pre-review.output.clean
@@ -179,7 +226,7 @@ nodes:
     runtime: bun
     depends_on: [gate]
     trigger_rule: all_done
-    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
     with:
       builder: "$build.output"
       pr: "$pick.output.pr"
@@ -212,9 +259,9 @@ nodes:
   - id: subject
     script: subject
     runtime: bun
-    depends_on: [claim, build, publish, ship]
+    depends_on: [claim, checkout, build, publish, ship]
     trigger_rule: all_done
-    when: "$pick.output.route != 'none' && $claim.output.held == 'true'"
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true' || $pick.output.route == 'complex' && $claim.output.held == 'true'"
     with:
       target: "$pick.output.target"
       pr: "$pick.output.pr"
@@ -343,6 +390,7 @@ nodes:
       runtime: "$INPUTS.runtime"
       merge: "$INPUTS.merge"
       rejections: "$INPUTS.rejections"
+      base_moves: "$INPUTS.base_moves"
     output_format:
       type: object
       properties:
@@ -413,7 +461,8 @@ nodes:
       identity: ""
 
   # Free the work item for the next lap however this run ended: after review and
-  # deploy finished, failed or were skipped.
+  # deploy finished, failed or were skipped. A branch the run's checkout was on that
+  # holds work no remote has keeps the claim live instead, naming that work.
   - id: release
     script: release
     runtime: bun

@@ -72,7 +72,7 @@ neither re-observed nor marked as carried is a FAIL.
 The commit that lands is this pull request merged with the current default branch, so that is what
 you test:
 
-- Check out the head (`gh pr checkout <n>`; if another worktree holds the branch, `git checkout -B <branch> origin/<branch> --ignore-other-worktrees`), confirm it is $INPUTS.head, then `git checkout --detach`, `git fetch origin $INPUTS.base` and `git merge --no-edit origin/$INPUTS.base`. The merge is made on a detached checkout so it never lands on the branch, and it is never pushed. If it conflicts, abort it, report one criterion line `C0` FAIL naming the conflicting files and `overall` FAIL, and stop.
+- Check out the head detached, never its branch (another worktree may hold the branch): `git fetch origin pull/<n>/head` and `git checkout --detach FETCH_HEAD`. Confirm it is $INPUTS.head, then `git fetch origin $INPUTS.base` and `git merge --no-edit origin/$INPUTS.base`. The merge is made on a detached checkout so it never lands on the branch, and it is never pushed. If it conflicts, abort it, report one criterion line `C0` FAIL naming the conflicting files and `overall` FAIL, and stop.
 - Report the merged commit as `merged_with`.
 
 ## Test

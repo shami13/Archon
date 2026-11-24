@@ -15,7 +15,7 @@
  */
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalRepoOfOrigin, publicationDeclined, rawLine, reportLine } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, publicationDeclined, pushesCommit, rawLine, reportLine } from '../../.shared/builder-report.ts';
 import { codexCli, fetchBase, runCodexReview, type CodexFinding } from '../../.shared/codex-review.ts';
 import { pullRefOf } from '../../.shared/external-review.ts';
 import { forgeSource } from '../../.shared/forge.ts';
@@ -51,7 +51,8 @@ function review(): void {
   const target = trimmed(process.env.INPUTS_TARGET);
   const branch = reportLine(builder, 'BRANCH') ?? git(['rev-parse', '--abbrev-ref', 'HEAD']);
   const current = git(['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (current !== branch) throw new Error(`the checkout is on ${current}, not on the builder's branch ${branch}`);
+  // A move that committed nothing (or declines publication) pushes nothing, so it may sit on any branch.
+  if (pushesCommit(builder) && current !== branch) throw new Error(`the checkout is on ${current}, not on the builder's branch ${branch}`);
   const dir = join(artifactsDir(), 'pre-review');
   mkdirSync(dir, { recursive: true });
   const head = git(['rev-parse', 'HEAD']);

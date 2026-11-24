@@ -910,6 +910,26 @@ async function waitForNodeRetry(
 const lastNodeActivityUpdate = new Map<string, number>();
 const ACTIVITY_HEARTBEAT_INTERVAL_MS = 60_000;
 
+/**
+ * Writes the run's `last_activity_at` while a node streams, at most once per
+ * ACTIVITY_HEARTBEAT_INTERVAL_MS per node key. Every provider stream must call it, or a
+ * live run reads as silent to stale/zombie detection.
+ */
+async function writeActivityHeartbeat(
+  store: Pick<WorkflowDeps['store'], 'updateWorkflowActivity'>,
+  workflowRunId: string,
+  nodeKey: string,
+  now: number
+): Promise<void> {
+  if (now - (lastNodeActivityUpdate.get(nodeKey) ?? 0) <= ACTIVITY_HEARTBEAT_INTERVAL_MS) return;
+  lastNodeActivityUpdate.set(nodeKey, now);
+  try {
+    await store.updateWorkflowActivity(workflowRunId);
+  } catch (e) {
+    getLog().warn({ err: e as Error, workflowRunId }, 'dag.activity_update_failed');
+  }
+}
+
 /** Default DAG node retry for TRANSIENT errors */
 const DEFAULT_NODE_MAX_RETRIES = 2;
 const DEFAULT_NODE_RETRY_DELAY_MS = 3000;
@@ -2471,18 +2491,7 @@ async function executeNodeInternal(
 
         if (await shouldStopStream()) break;
 
-        // Activity heartbeat — write, throttled to every 60s (only for stale/zombie detection)
-        if (tickNow - (lastNodeActivityUpdate.get(nodeKey) ?? 0) > ACTIVITY_HEARTBEAT_INTERVAL_MS) {
-          lastNodeActivityUpdate.set(nodeKey, tickNow);
-          try {
-            await deps.store.updateWorkflowActivity(workflowRun.id);
-          } catch (e) {
-            getLog().warn(
-              { err: e as Error, workflowRunId: workflowRun.id },
-              'dag.activity_update_failed'
-            );
-          }
-        }
+        await writeActivityHeartbeat(deps.store, workflowRun.id, nodeKey, tickNow);
 
         if (msg.type === 'result') {
           if (pass.threadsSession) {
@@ -5916,6 +5925,7 @@ async function executeLoopNode(
           };
 
           const pass = structuredOutputPass(reaskAttempt, resumeSessionId, false);
+          const loopHeartbeatKey = `${workflowRun.id}:${node.id}`;
           const generator = aiClient.sendQuery(
             finalPrompt,
             cwd,
@@ -5990,6 +6000,13 @@ async function executeLoopNode(
               shouldStopStream
             )) {
               if (await shouldStopStream()) break;
+
+              await writeActivityHeartbeat(
+                deps.store,
+                workflowRun.id,
+                loopHeartbeatKey,
+                Date.now()
+              );
 
               if (msg.type === 'result') {
                 // A reask's throwaway session is not the thread (structuredOutputPass):
@@ -6092,6 +6109,7 @@ async function executeLoopNode(
               }
             }
           } finally {
+            lastNodeActivityUpdate.delete(loopHeartbeatKey);
             await providerEvents.clearAttention();
           }
           foldIterationUsage();

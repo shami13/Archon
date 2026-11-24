@@ -6,14 +6,16 @@
  * some (see `.shared/workable.ts` for the rules). It reads GitHub. Its one write: the
  * scheduler names runs it knows have ended (`INPUTS_ENDED_RUNS`, comma-separated), and
  * a claim one of them still holds is released the way the run's own release step would
- * have, because a run killed before that step never frees its item.
+ * have, because a run killed before that step never frees its item. The scheduler passes the
+ * lap's `labels_only` and `labels_skip` inputs as `INPUTS_LABELS_ONLY` and `INPUTS_LABELS_SKIP`,
+ * so a lap is not started for items its pick would leave to another loop.
  *
  * Output: `{ "workable": [{kind, number}], "claims": [{kind, number, run}], "ended": [...], "waiting": [...] }`.
  */
 
 import { expiryHours } from '../../.shared/claims.ts';
 import { trimmed } from '../../.shared/io.ts';
-import { workability, type BoardItem } from '../../.shared/workable.ts';
+import { labelNames, workability, type BoardItem } from '../../.shared/workable.ts';
 
 function gh(args: string[]): unknown {
   const result = Bun.spawnSync(['gh', ...args], { stdout: 'pipe', stderr: 'pipe' });
@@ -58,7 +60,10 @@ const endedRuns = new Set(
     .map(run => run.trim())
     .filter(run => run !== '')
 );
-const result = workability(board, expiryHours(trimmed(process.env.INPUTS_CLAIM_HOURS)), Date.now(), endedRuns);
+const result = workability(board, expiryHours(trimmed(process.env.INPUTS_CLAIM_HOURS)), Date.now(), endedRuns, {
+  only: labelNames(trimmed(process.env.INPUTS_LABELS_ONLY)),
+  skip: labelNames(trimmed(process.env.INPUTS_LABELS_SKIP)),
+});
 for (const claim of result.ended) {
   const id = /#issuecomment-(\d+)$/.exec(claim.url)?.[1];
   if (id === undefined) continue;

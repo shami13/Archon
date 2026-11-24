@@ -8478,6 +8478,39 @@ describe('executeDagWorkflow -- resume with priorCompletedNodes', () => {
       expect(recorded).toEqual(['subtask', 'hook', 'subtask', 'agent_message_chunk']);
     });
 
+    it('writes the run activity heartbeat while a loop iteration streams — darunki#481', async () => {
+      const store = createMockStore();
+      mockSendQueryDag.mockImplementation(async function* () {
+        yield { type: 'agent_message_chunk', text: 'Done. <promise>COMPLETE</promise>' };
+        yield { type: 'result', sessionId: 'loop-sess-heartbeat' };
+      });
+
+      await executeDagWorkflow(
+        dagOptions({
+          deps: createMockDeps(store),
+          cwd: testDir,
+          workflow: {
+            name: 'dag-loop-heartbeat',
+            nodes: [
+              {
+                id: 'my-loop',
+                kind: 'loop',
+                loop: {
+                  fresh_context: false,
+                  prompt: 'Do a task. When done, output <promise>COMPLETE</promise>.',
+                  until: 'COMPLETE',
+                  max_iterations: 5,
+                },
+              },
+            ],
+          },
+          workflowRun: makeWorkflowRun('loop-heartbeat-run'),
+        })
+      );
+
+      expect(store.updateWorkflowActivity).toHaveBeenCalledWith('loop-heartbeat-run');
+    });
+
     it('numbers every iteration of a loop attempt from one sequence', async () => {
       const store = createMockStore();
       let iteration = 0;

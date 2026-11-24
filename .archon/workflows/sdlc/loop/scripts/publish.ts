@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalRepoOfOrigin, publicationDeclined, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
+import { canonicalRepoOfOrigin, publicationDeclined, pushesCommit, rawLine, reportLine, withCodexReviewSection } from '../../.shared/builder-report.ts';
 import { storeReview, type CodexReview } from '../../.shared/codex-review.ts';
 import { Ledger, pullRefOf } from '../../.shared/external-review.ts';
 import { ForgeOperationError, type ForgeSource, type QualifiedPr, forgeSource, sameRepo } from '../../.shared/forge.ts';
@@ -92,7 +92,8 @@ function publish(): void {
   const builder = trimmed(process.env.INPUTS_BUILDER);
   const target = trimmed(process.env.INPUTS_TARGET);
   const branch = reportLine(builder, 'BRANCH') ?? git(['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (git(['rev-parse', '--abbrev-ref', 'HEAD']) !== branch) throw new Error(`the checkout is not on ${branch}`);
+  // Only a commit is pushed from the checkout; a no-commit move writes to the pull request alone.
+  if (pushesCommit(builder) && git(['rev-parse', '--abbrev-ref', 'HEAD']) !== branch) throw new Error(`the checkout is not on ${branch}`);
   const head = git(['rev-parse', 'HEAD']);
   const reviewPath = join(artifactsDir(), 'pre-review', 'latest.json');
   const review = existsSync(reviewPath) ? (JSON.parse(readFileSync(reviewPath, 'utf8')) as CodexReview) : undefined;

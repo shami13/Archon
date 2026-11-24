@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import {
   closes,
   dependencies,
+  labelHold,
+  labelNames,
   workability,
   type BoardItem,
 } from '../../workflows/sdlc/.shared/workable';
@@ -115,5 +117,26 @@ describe('loop launch gate', () => {
       now
     );
     expect(parked.workable).toEqual([]);
+  });
+
+  it('a label filter splits the board between two loops; no filter keeps every item', () => {
+    const board = {
+      issues: [item(1, { labels: ['host:mac'] }), item(2), item(3, { labels: ['bug'] })],
+      pulls: [item(20, { body: 'Closes #1' })],
+    };
+    const numbers = (filter?: { only: string[]; skip: string[] }): number[] =>
+      workability(board, 6, now, new Set(), filter).workable.map(w => w.number);
+
+    expect(numbers()).toEqual([20, 2, 3]);
+    // The pull request carries the label of the issue it closes.
+    expect(numbers({ only: [], skip: labelNames(' host:mac , ') })).toEqual([2, 3]);
+    expect(numbers({ only: labelNames('Host:Mac'), skip: [] })).toEqual([20]);
+    expect(workability(board, 6, now, new Set(), { only: [], skip: ['host:mac'] }).waiting).toContainEqual({
+      kind: 'issue',
+      number: 1,
+      why: 'host:mac',
+    });
+    expect(labelHold(['bug'], { only: ['host:mac', 'docs'], skip: [] })).toBe('not labelled host:mac or docs');
+    expect(labelHold(['host:mac'], { only: ['host:mac'], skip: ['host:mac'] })).toBe('host:mac');
   });
 });

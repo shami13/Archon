@@ -46,22 +46,43 @@ export function parseClaudeConfig(raw: Record<string, unknown>): ClaudeProviderD
     result.claudeBinaryPath = raw.claudeBinaryPath;
   }
 
+  for (const key of ['workflowPlugins', 'workflowSkills'] as const) {
+    const names = nonEmptyStrings(raw[key]);
+    if (names !== undefined) result[key] = names;
+  }
+
   return result;
 }
 
+/** The trimmed non-empty strings of an array, or undefined when raw is not an array. */
+function nonEmptyStrings(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .map(v => v.trim());
+}
+
+const nameList = z.array(configStringSchema);
 const fields = {
   model: configStringSchema.optional(),
   settingSources: z
     .array(z.enum(['project', 'user'], { error: "expected 'project' or 'user'" }))
     .optional(),
   claudeBinaryPath: configStringSchema.optional(),
+  workflowPlugins: nameList.optional(),
+  workflowSkills: nameList.optional(),
 };
 export const configSchemas = {
   install: z.strictObject(fields),
   run: z.strictObject(fields),
   snapshot: snapshotConfigSchema(
     { model: fields.model },
-    { settingSources: fields.settingSources, claudeBinaryPath: fields.claudeBinaryPath }
+    {
+      settingSources: fields.settingSources,
+      claudeBinaryPath: fields.claudeBinaryPath,
+      workflowPlugins: fields.workflowPlugins,
+      workflowSkills: fields.workflowSkills,
+    }
   ),
 };
 

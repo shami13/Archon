@@ -75,6 +75,7 @@ deliver__review__scope:
 deliver__review__code: "0 findings"
 deliver__review__simplify__simplify: { findings: false }
 deliver__review__seams: "0 findings"
+deliver__ponytail-review__ponytail-review: { findings: false }
 deliver__shape__simplify: { findings: false }
 deliver__review__tests: "0 findings"
 deliver__review__review-complete: "settled"

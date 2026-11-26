@@ -65,6 +65,7 @@ ship__deliver__review__scope:
 ship__deliver__review__code: "0 findings"
 ship__deliver__review__simplify__simplify: { findings: false }
 ship__deliver__review__seams: "0 findings"
+ship__deliver__ponytail-review__ponytail-review: { findings: false }
 ship__deliver__shape__simplify: { findings: false }
 ship__deliver__review__tests: "0 findings"
 ship__deliver__review__review-complete: "settled"

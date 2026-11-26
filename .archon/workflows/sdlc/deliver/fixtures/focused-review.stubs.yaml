@@ -22,6 +22,7 @@ review__scope:
   pr: { repo: { host: "github.com", path: "example/repo" }, number: 2 }
 review__focused: { full_review: false, reason: "stub: no engaged full-review risk" }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__review-complete: "settled"
 review__synthesize:

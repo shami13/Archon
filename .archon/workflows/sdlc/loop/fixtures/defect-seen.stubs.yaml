@@ -12,6 +12,7 @@ pick:
   area: app/
   reason: "stub: next unblocked issue, one module, clear criteria"
 build: "Built the gate.\nPR: https://github.com/example/app/pull/9"
+ponytail-review__ponytail-review: { findings: false }
 subject:
   pr: "https://github.com/example/app/pull/9"
   head: "abc1234"
@@ -72,7 +73,7 @@ claim:
 release: "released 1 claim(s)"
 fixture:
   expect: completed
-  reached: [pick, claim, build, pre-review, publish, subject, check-app, evidence, review, release]
+  reached: [pick, claim, build, ponytail-review__ponytail-review, pre-review, publish, subject, check-app, evidence, review, release]
   resolved-text-contains:
     review: "Overall says PASS over D1"
   inputs:

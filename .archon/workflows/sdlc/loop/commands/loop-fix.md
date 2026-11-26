@@ -12,6 +12,10 @@ Your report:
 
 $INPUTS.builder
 
+## Use the code graph first
+
+When `graphify-out/graph.json` exists in the checkout, start here, before you edit: run `graphify query "<the task in a few words>"`, and `graphify affected "<symbol>"` for each symbol you will change (or use the graphify skill), then read the files they name. List the graph results you used in your report. When the file is missing, say "No code graph in this checkout" in your report and go on.
+
 ## Do it
 
 - Read the review in full. Fix every P0, P1 and P2 finding on the branch you are on, with a test when the finding names a behaviour. Decline a finding only with evidence that it is wrong or already satisfied, written in `$ARTIFACTS_DIR/pre-review/dispositions.md` under the finding's title; the next review round reads the code, not the dispositions, so a decline must hold on its own. A P3 note is yours to fix or leave.

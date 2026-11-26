@@ -34,6 +34,10 @@ When the work or the request names a tracked item — an issue, a ticket, a docu
 
 This run must already be on that pull request's branch, or for a pull request from a fork, on the run's review branch at the pull request's head — launched onto it with `--adopt`, or from the pull request itself. Confirm that before editing with `gh pr view <number> --repo "$REPO_PATH" --json headRefName,headRefOid,isCrossRepository,maintainerCanModify`, where `REPO_PATH` is the `owner/repo` of `origin` — in a clone of a fork the CLI's default resolution targets the fork's upstream parent, and the check would read the wrong pull request. For a same-repository pull request, `git branch --show-current` must equal `headRefName`. For a fork (`isCrossRepository: true`), `git rev-parse HEAD` must equal `headRefOid` at the start of the run, and `maintainerCanModify` must be true: that flag is the author's permission for this run to push to their branch, and without it the work has nowhere to go. If either check fails, stop with `done: true, green: false` and say which check failed; never switch branches, fetch the pull request's head into this checkout, or start a replacement branch — the run's estate is fixed at launch, and work done anywhere else is invisible to it. On a match, work and commit on the current branch as usual; the pull request stays the one public surface, and later nodes push to its head and read it back by its number.
 
+## Use the code graph first
+
+When `graphify-out/graph.json` exists in the checkout, start here, before you edit: run `graphify query "<the task in a few words>"`, and `graphify affected "<symbol>"` for each symbol you will change (or use the graphify skill), then read the files they name. List the graph results you used in your report. When the file is missing, say "No code graph in this checkout" in your report and go on.
+
 ## How to work
 
 1. Make the project runnable first: if dependencies are missing, install them with the project's own package manager in locked mode. Never update a lockfile.

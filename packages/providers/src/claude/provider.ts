@@ -58,6 +58,7 @@ import type {
   TokenUsage,
   ProviderCapabilities,
   NodeConfig,
+  ClaudeProviderDefaults,
 } from '../types';
 import {
   sessionPreview,
@@ -598,6 +599,26 @@ export function buildSDKHooksFromYAML(
 }
 
 // ─── NodeConfig → SDK Options Translation ──────────────────────────────────
+
+/** A workflow node's config with the host's default plugins and skills added to its own. */
+export function withWorkflowDefaults(
+  nodeConfig: NodeConfig | undefined,
+  defaults: ClaudeProviderDefaults
+): NodeConfig | undefined {
+  if (!isWorkflowNode(nodeConfig)) return nodeConfig;
+  const plugins = union(nodeConfig.plugins, defaults.workflowPlugins);
+  const skills = union(nodeConfig.skills, defaults.workflowSkills);
+  return {
+    ...nodeConfig,
+    ...(plugins ? { plugins } : {}),
+    ...(skills ? { skills } : {}),
+  };
+}
+
+function union(own: string[] | undefined, extra: string[] | undefined): string[] | undefined {
+  if (!extra?.length) return own;
+  return [...new Set([...(own ?? []), ...extra])];
+}
 
 /** A non-empty nodeId marks a workflow node, the declared-only capability path. */
 function isWorkflowNode(nodeConfig: NodeConfig | undefined): nodeConfig is NodeConfig {
@@ -1679,7 +1700,9 @@ export class ClaudeProvider implements IAgentProvider {
         [...settingSources]
       );
 
-      if (requestOptions?.nodeConfig) {
+      // The host's workflowPlugins/workflowSkills join every workflow node's own list.
+      const nodeConfig = withWorkflowDefaults(requestOptions?.nodeConfig, assistantDefaults);
+      if (nodeConfig && requestOptions) {
         const skillSearch = {
           ...(env.CLAUDE_CONFIG_DIR ? { userConfigDir: env.CLAUDE_CONFIG_DIR } : {}),
           includeProject: settingSources.includes('project'),
@@ -1688,7 +1711,7 @@ export class ClaudeProvider implements IAgentProvider {
         };
         const nodeConfigWarnings = await applyNodeConfig(
           options,
-          requestOptions.nodeConfig,
+          nodeConfig,
           cwd,
           skillSearch,
           () =>
@@ -1753,7 +1776,6 @@ export class ClaudeProvider implements IAgentProvider {
         options.env as Record<string, string>,
         options.model
       );
-      const nodeConfig = requestOptions?.nodeConfig;
       const events = withFirstMessageTimeout(
         isWorkflowNode(nodeConfig)
           ? withPluginScopeCheck(rawEvents, nodeConfig.plugins ?? [])

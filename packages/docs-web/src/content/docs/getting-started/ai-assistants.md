@@ -154,9 +154,14 @@ assistants:
     # Optional: absolute path to the Claude Code executable.
     # Required in compiled Archon binaries if CLAUDE_BIN_PATH is not set.
     # claudeBinaryPath: /absolute/path/to/claude
+    # Optional: plugins and skills every workflow node loads, on top of its own.
+    # workflowPlugins: [ponytail@ponytail]
+    # workflowSkills: [graphify]
 ```
 
 The `settingSources` option controls where the Claude Code SDK discovers `CLAUDE.md`, skill, command, and agent files. The default is `['project', 'user']`, which includes both the project-level `<cwd>/.claude/` and your personal `~/.claude/`. For workflow skills, discovery is only eligibility: the node's `skills:` list remains the exact active selection, and omission/`[]` activates none. Set `settingSources` to `['project']` to exclude user-level resources, or `[]` for a lean node with no setting sources; a declared skill must live under a source the node enables. See [Claude SDK Advanced Options](/guides/authoring-workflows/#claude-sdk-advanced-options).
+
+`workflowPlugins` and `workflowSkills` add to every workflow node's own `plugins:` and `skills:` lists; they do not change direct chat. They suit the global `~/.archon/config.yaml` of one host: a named plugin that is not installed there fails the node before its session starts, and a named skill must be on disk under an enabled setting source.
 
 ### Set as Default (Optional)
 

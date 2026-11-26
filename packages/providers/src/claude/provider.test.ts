@@ -3139,6 +3139,74 @@ describe('sendQuery decomposition behaviors', () => {
       }
     });
 
+    test("the host's workflow plugins and skills join every workflow node's own", async () => {
+      pluginIdsSpy.mockResolvedValue(['posthog@official', 'ponytail@ponytail', 'prp-core@prp']);
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          ...builtinInit,
+          plugins: [
+            ...builtinInit.plugins,
+            { name: 'ponytail', path: '/t', source: 'ponytail@ponytail' },
+            { name: 'posthog', path: '/p', source: 'posthog@official' },
+          ],
+        };
+        yield { type: 'result', session_id: 'sid' };
+      });
+      const assistantConfig = {
+        workflowPlugins: ['ponytail@ponytail'],
+        workflowSkills: ['graphify'],
+      };
+
+      for (const nodeConfig of [
+        { nodeId: 'plain' },
+        { nodeId: 'named', plugins: ['posthog@official'], skills: ['tdd'] },
+      ]) {
+        for await (const _ of client.sendQuery('test', tmpdir(), undefined, {
+          nodeConfig,
+          assistantConfig,
+        })) {
+          // consume
+        }
+      }
+
+      const [plain, named] = mockQuery.mock.calls.map(
+        call => (call[0] as { options: Options }).options
+      );
+      expect(plain.settings).toEqual({
+        enabledPlugins: {
+          'posthog@official': false,
+          'ponytail@ponytail': true,
+          'prp-core@prp': false,
+        },
+        syncClaudeAiPlugins: false,
+      });
+      expect(plain.skills).toEqual(['graphify']);
+      expect(named.settings).toEqual({
+        enabledPlugins: {
+          'posthog@official': true,
+          'ponytail@ponytail': true,
+          'prp-core@prp': false,
+        },
+        syncClaudeAiPlugins: false,
+      });
+      expect(named.skills).toEqual(['tdd', 'graphify']);
+    });
+
+    test('direct chat ignores the workflow defaults', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', session_id: 'sid' };
+      });
+
+      for await (const _ of client.sendQuery('chat', tmpdir(), undefined, {
+        assistantConfig: { workflowPlugins: ['ponytail@ponytail'] },
+      })) {
+        // consume
+      }
+
+      expect(pluginIdsSpy).not.toHaveBeenCalled();
+      expect((mockQuery.mock.calls[0][0] as { options: Options }).options.settings).toBeUndefined();
+    });
+
     test('a resumed node gets the same plugin scope as a fresh one', async () => {
       pluginIdsSpy.mockResolvedValue(['posthog@official']);
       mockQuery.mockImplementation(async function* () {

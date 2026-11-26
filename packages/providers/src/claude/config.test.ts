@@ -15,10 +15,27 @@ describe('Claude config contract', () => {
       model: 'sonnet',
       settingSources: ['project', 'user'],
       claudeBinaryPath: '/configured/claude',
+      workflowPlugins: ['ponytail@ponytail'],
+      workflowSkills: ['graphify'],
     } satisfies CompleteClaudeConfig;
 
     expect(parseClaudeConfigStrict(config)).toEqual(config);
     expect(parseClaudeConfig(config)).toEqual(config);
+  });
+});
+
+describe('parseClaudeConfig workflow defaults', () => {
+  test('keeps trimmed non-empty names and drops the rest', () => {
+    expect(
+      parseClaudeConfig({
+        workflowPlugins: [' ponytail@ponytail ', '', 3],
+        workflowSkills: 'graphify',
+      })
+    ).toEqual({ workflowPlugins: ['ponytail@ponytail'] });
+  });
+
+  test('the strict parser refuses an empty name', () => {
+    expect(() => parseClaudeConfigStrict({ workflowSkills: [''] })).toThrow();
   });
 });
 

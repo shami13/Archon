@@ -97,5 +97,6 @@ fixture:
   resolved-text-contains:
     impl__implement: "repair of an existing pull request on its own branch: commit here and never open another branch or pull request for it"
     fix__implement: "repair of an existing pull request on its own branch: commit here and never open another branch or pull request for it"
+    ponytail-review__ponytail-review: "pull request #42, already open on this branch"
     validate__discover: "packages/fixture-scope"
 exec-code: true

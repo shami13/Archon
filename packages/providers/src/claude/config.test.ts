@@ -34,8 +34,11 @@ describe('parseClaudeConfig workflow defaults', () => {
     ).toEqual({ workflowPlugins: ['ponytail@ponytail'] });
   });
 
-  test('the strict parser refuses an empty name', () => {
-    expect(() => parseClaudeConfigStrict({ workflowSkills: [''] })).toThrow();
+  test('the strict parser refuses a blank name and trims the others', () => {
+    expect(() => parseClaudeConfigStrict({ workflowSkills: ['   '] })).toThrow();
+    expect(parseClaudeConfigStrict({ workflowPlugins: [' ponytail@ponytail '] })).toEqual({
+      workflowPlugins: ['ponytail@ponytail'],
+    });
   });
 });
 

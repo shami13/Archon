@@ -62,7 +62,7 @@ function nonEmptyStrings(raw: unknown): string[] | undefined {
     .map(v => v.trim());
 }
 
-const nameList = z.array(z.string().trim().min(1, 'each name must be a non-empty string'));
+const nameList = z.array(configStringSchema);
 const fields = {
   model: configStringSchema.optional(),
   settingSources: z

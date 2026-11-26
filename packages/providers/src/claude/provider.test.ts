@@ -3141,15 +3141,15 @@ describe('sendQuery decomposition behaviors', () => {
 
     test("the host's workflow plugins and skills join every workflow node's own", async () => {
       pluginIdsSpy.mockResolvedValue(['posthog@official', 'ponytail@ponytail', 'prp-core@prp']);
-      mockQuery.mockImplementation(async function* () {
-        yield {
-          ...builtinInit,
-          plugins: [
-            ...builtinInit.plugins,
-            { name: 'ponytail', path: '/t', source: 'ponytail@ponytail' },
-            { name: 'posthog', path: '/p', source: 'posthog@official' },
-          ],
-        };
+      // The session reports what the settings enabled, as Claude Code does.
+      mockQuery.mockImplementation(async function* ({ options }: { options?: Options }) {
+        const settings = options?.settings as
+          | { enabledPlugins?: Record<string, boolean> }
+          | undefined;
+        const enabled = Object.entries(settings?.enabledPlugins ?? {})
+          .filter(([, on]) => on)
+          .map(([id]) => ({ name: id.split('@')[0], path: `/${id}`, source: id }));
+        yield { ...builtinInit, plugins: [...builtinInit.plugins, ...enabled] };
         yield { type: 'result', session_id: 'sid' };
       });
       const assistantConfig = {
@@ -3157,39 +3157,47 @@ describe('sendQuery decomposition behaviors', () => {
         workflowSkills: ['graphify'],
       };
 
+      const results: { found: boolean; isError: unknown; failure: unknown }[] = [];
       for (const nodeConfig of [
         { nodeId: 'plain' },
         { nodeId: 'named', plugins: ['posthog@official'], skills: ['tdd'] },
       ]) {
-        for await (const _ of client.sendQuery('test', tmpdir(), undefined, {
+        const chunks: MessageChunk[] = [];
+        for await (const chunk of client.sendQuery('test', tmpdir(), undefined, {
           nodeConfig,
           assistantConfig,
         })) {
-          // consume
+          chunks.push(chunk);
         }
+        const result = chunks.find(c => c.type === 'result');
+        results.push({ found: !!result, isError: result?.isError, failure: result?.failure });
       }
 
       const [plain, named] = mockQuery.mock.calls.map(
         call => (call[0] as { options: Options }).options
       );
-      expect(plain.settings).toEqual({
+      expect(plain.settings).toMatchObject({
+        syncClaudeAiPlugins: false,
         enabledPlugins: {
           'posthog@official': false,
           'ponytail@ponytail': true,
           'prp-core@prp': false,
         },
-        syncClaudeAiPlugins: false,
       });
       expect(plain.skills).toEqual(['graphify']);
-      expect(named.settings).toEqual({
+      expect(named.settings).toMatchObject({
+        syncClaudeAiPlugins: false,
         enabledPlugins: {
           'posthog@official': true,
           'ponytail@ponytail': true,
           'prp-core@prp': false,
         },
-        syncClaudeAiPlugins: false,
       });
       expect(named.skills).toEqual(['tdd', 'graphify']);
+      expect(results).toEqual([
+        { found: true, isError: undefined, failure: undefined },
+        { found: true, isError: undefined, failure: undefined },
+      ]);
     });
 
     test('direct chat ignores the workflow defaults', async () => {

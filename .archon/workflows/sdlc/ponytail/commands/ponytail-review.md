@@ -12,7 +12,7 @@ If the builder's report has `COMMIT: none` or `PUBLISH: no`, nothing will be pub
 
 ## What to review
 
-The diff is this branch's commits over its base: fetch `origin $BASE_BRANCH` and read `git diff origin/$BASE_BRANCH...HEAD`. For a pull request this run continues, judge what this run's commits change. Judge the change against the work order only; do not broaden into unrelated cleanup.
+The diff is this branch's commits over its base. When the work order names a pull request this run continues, its base is that pull request's: `gh pr view <url> --repo <owner/repo of origin> --json baseRefName`. Otherwise it is `$BASE_BRANCH`. Fetch `origin <base>` and read `git diff origin/<base>...HEAD`. For a pull request this run continues, judge what this run's commits change. Judge the change against the work order only; do not broaden into unrelated cleanup.
 
 Read the connected code, not only the diff. When `graphify-out/graph.json` exists in the checkout, find it with `graphify affected "<symbol>"` for each changed symbol and `graphify query "<the change in a few words>"` (or the graphify skill), and name the graph results you used in your report; when the file is missing, say so there and go on. Read the callers of every changed function, the functions it calls, the tests. When a signature, a return value or a behavior changes, grep every caller. Find the expected load in the repository (README, deploy config) and judge scale against it.
 

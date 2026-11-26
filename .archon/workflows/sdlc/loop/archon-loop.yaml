@@ -182,6 +182,8 @@ nodes:
       work_order: >-
         Work item: $pick.output.target
 
+        Pull request this run continues (empty for a new issue): $pick.output.pr
+
         The builder's report:
         $build.output
 

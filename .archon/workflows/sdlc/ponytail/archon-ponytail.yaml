@@ -27,9 +27,9 @@ nodes:
     command: ponytail-review
     context: fresh
     mutates_checkout: false
-    # A plugin skill: it loads only where the host enables the ponytail plugin
-    # (assistants.claude.workflowPlugins). Elsewhere the command's own checklist applies.
-    skills: [ponytail:ponytail-review]
+    # No skills: here, so every provider can run it. A host that wants the
+    # ponytail-review skill adds it with assistants.claude.workflowSkills (and the
+    # plugin with workflowPlugins); elsewhere the command's own checklist applies.
     output_format:
       type: object
       properties:

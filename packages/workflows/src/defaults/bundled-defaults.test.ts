@@ -139,6 +139,18 @@ describe('bundled-defaults', () => {
     });
   });
 
+  describe('BUNDLED_WORKFLOWS provider portability', () => {
+    // A node that names skills or plugins fails the capability preflight on a provider
+    // without them (Codex declares skills: false); hosts add them through
+    // assistants.claude.workflowSkills / workflowPlugins instead.
+    it('no bundled workflow names skills or plugins on a node', () => {
+      const naming = Object.entries(BUNDLED_WORKFLOWS)
+        .filter(([, content]) => /^\s+(skills|plugins):/m.test(content))
+        .map(([name]) => name);
+      expect(naming).toEqual([]);
+    });
+  });
+
   describe('BUNDLED_COMMANDS', () => {
     it('every command has meaningful content (>50 chars)', () => {
       for (const content of Object.values(BUNDLED_COMMANDS)) {

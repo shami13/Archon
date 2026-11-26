@@ -16,7 +16,7 @@ When `graphify-out/graph.json` exists in the checkout, start here, before you ed
 
 ## Do it
 
-- Read the review in full. Adopt every finding the project's values back (its `engineering.md` and direction document), on the branch you are on, with a test when the finding names a behaviour. Decline one only with evidence that it is wrong or that its smaller shape changes behaviour, written in `$ARTIFACTS_DIR/ponytail-dispositions.md` under the finding: the Codex review that follows reads the code, so a decline must hold on its own. Keep the requested outcome and its tests intact.
+- Read the review in full. Adopt every finding the project's values back (its `engineering.md` and direction document), on the branch you are on, with a test when the finding names a behaviour. Decline one only with evidence that it is wrong or that its smaller shape changes behaviour, written in `$ARTIFACTS_DIR/ponytail-dispositions.md` under the finding: the loop's reviewer reads the review and these dispositions before it decides, and a decline that does not hold sends the pull request back. Keep the requested outcome and its tests intact.
 - Run the project's checks your change touches, as small as the finding they answer. If the change is something a user would see or do, run the app the way a user would and look: $INPUTS.runtime
 - Commit on the same branch. Do not push, do not open or edit the pull request: the loop reviews the new commit and pushes it. Keep `$ARTIFACTS_DIR/pull-request/body.md` and `comment.md` current with what you changed.
 

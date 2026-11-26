@@ -151,7 +151,7 @@ nodes:
         $ARTIFACTS_DIR/ponytail-review.md. Read it and the accepted work order below in
         full. Adopt every finding the project's values back. Decline one only with the
         evidence that it is wrong or that its smaller shape changes behavior; the
-        review that follows judges every decline. Write
+        first review round's synthesis judges every decline. Write
         $ARTIFACTS_DIR/ponytail-dispositions.md with one entry per finding: adopted, or
         declined with its evidence. Keep the requested outcome and its tests intact.
 

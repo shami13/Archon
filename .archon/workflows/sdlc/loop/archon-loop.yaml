@@ -42,7 +42,28 @@ inputs:
     default: "2"
     description: >-
       How many review send-backs one item may collect before the loop stops
-      retrying and returns it to the owner.
+      retrying and returns it to the owner. A send-back whose only cause is that
+      the head is behind or conflicts with the default branch (`Loop review: base
+      moved`) does not count here; base_moves caps those.
+  base_moves:
+    default: "5"
+    description: >-
+      How many base-moved send-backs and merge-gate refusals (`Loop review: base
+      moved`: nothing to change but merging the default branch in) one item may
+      collect before the loop returns it to the owner, so a branch that conflicts
+      with every new commit on the default branch still stops.
+  labels_only:
+    default: ""
+    description: >-
+      Optional comma-separated label names. When set, the loop works only issues
+      and pull requests carrying at least one of them (a pull request also
+      carries the labels of the issues it closes). Empty: every item.
+  labels_skip:
+    default: ""
+    description: >-
+      Optional comma-separated label names. The loop never works an issue or pull
+      request carrying one of them (a pull request also carries the labels of the
+      issues it closes). Empty: none skipped.
   deploy:
     default: ""
     description: >-
@@ -51,6 +72,12 @@ inputs:
   health:
     default: ""
     description: Trusted health command for archon-deploy; required with deploy.
+  cleanup:
+    default: ""
+    description: >-
+      Optional trusted command run in the run's checkout as its last step, however
+      the run ended, to delete what the lap built and no longer needs (test data,
+      build caches). Empty skips it.
   claim_hours:
     default: "6"
     description: >-
@@ -68,6 +95,9 @@ nodes:
       runtime: "$INPUTS.runtime"
       attempts: "$INPUTS.attempts"
       rejections: "$INPUTS.rejections"
+      base_moves: "$INPUTS.base_moves"
+      labels_only: "$INPUTS.labels_only"
+      labels_skip: "$INPUTS.labels_skip"
       claim_hours: "$INPUTS.claim_hours"
     output_format:
       type: object
@@ -83,7 +113,8 @@ nodes:
 
   # Several runs of this loop may work one repository at once. The claim is the
   # one hard fact between them: the oldest live claim comment on a work item
-  # holds it, and a run that lost the race does no work this lap.
+  # holds it, and a run that lost the race does no work this lap. An item this run's
+  # label filter leaves out is not claimed either, whatever pick chose.
   - id: claim
     script: claim
     runtime: bun
@@ -95,6 +126,8 @@ nodes:
       route: "$pick.output.route"
       area: "$pick.output.area"
       claim_hours: "$INPUTS.claim_hours"
+      labels_only: "$INPUTS.labels_only"
+      labels_skip: "$INPUTS.labels_skip"
     output_format:
       type: object
       properties:
@@ -103,19 +136,138 @@ nodes:
         reason: { type: string }
       required: [held, holder, reason]
 
+  # A continued pull request's branch, checked out here before the builder starts, so the
+  # builder never forces a checkout. Another worktree that has the branch is detached first;
+  # when that branch or worktree holds work no remote has, the lap leaves the item (`ok:
+  # "false"`) and builds, checks and reviews nothing.
+  - id: checkout
+    script: checkout
+    runtime: bun
+    depends_on: [claim]
+    when: "$claim.output.held == 'true' && $pick.output.route == 'continue'"
+    with:
+      pr: "$pick.output.pr"
+    output_format:
+      type: object
+      properties:
+        ok: { type: string, enum: ["true", "false"] }
+        branch: { type: string }
+        reason: { type: string }
+      required: [ok, branch, reason]
+
   # Contained work and finishing an open pull request: the in-loop builder.
   - id: build
     command: loop-work
     context: fresh
     idle_timeout: 2700000
-    depends_on: [claim]
-    when: "$claim.output.held == 'true' && $pick.output.route == 'continue' || $claim.output.held == 'true' && $pick.output.route == 'simple'"
+    depends_on: [claim, checkout]
+    trigger_rule: none_failed_min_one_success
+    when: "$claim.output.held == 'true' && $pick.output.route == 'continue' && $checkout.output.ok == 'true' || $claim.output.held == 'true' && $pick.output.route == 'simple'"
     with:
       route: "$pick.output.route"
       target: "$pick.output.target"
       pr: "$pick.output.pr"
       reason: "$pick.output.reason"
       runtime: "$INPUTS.runtime"
+
+  # The ponytail review judges the builder's commit (correct, safe, under load, tested,
+  # fast, lean) while nothing is pushed; ponytail-fix adopts its findings in a commit on
+  # top, and the Codex gate below then reviews that HEAD, which descends from the
+  # builder's commit. Ponytail itself comes from the host's config, never from here.
+  - id: ponytail-review
+    include: archon-ponytail
+    depends_on: [build]
+    when: "$claim.output.held == 'true' && $pick.output.route == 'continue' && $checkout.output.ok == 'true' || $claim.output.held == 'true' && $pick.output.route == 'simple'"
+    with:
+      work_order: >-
+        Work item: $pick.output.target
+
+        Pull request this run continues (empty for a new issue): $pick.output.pr
+
+        The builder's report:
+        $build.output
+
+  - id: ponytail-fix
+    command: loop-ponytail-fix
+    context: fresh
+    idle_timeout: 2700000
+    depends_on: [ponytail-review]
+    when: "$ponytail-review.output.findings == true"
+    with:
+      builder: "$build.output"
+      target: "$pick.output.target"
+      runtime: "$INPUTS.runtime"
+
+  # Codex reads the builder's commit before it leaves the checkout. Nothing is pushed
+  # until a review has no blocking finding; a correction round fixes and commits, and
+  # the next round reviews that commit. Three rounds that still block end the group
+  # as failed, so nothing is pushed and the next lap starts over. publish then pushes
+  # exactly the commit the clean review read, opens or updates the pull request with
+  # the review's summary in its body, and keeps the review beside the pull request's
+  # ledger, so the gate after the push reuses it instead of reviewing the head twice.
+  - id: gate
+    depends_on: [ponytail-review, ponytail-fix]
+    trigger_rule: none_failed_min_one_success
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    loop_group:
+      until_bash: |
+        value=$pre-review.output.clean
+        test "$value" = "true"
+      # Three reviews: the builder's commit and up to two corrections. A third correction
+      # gets no review and is never pushed; the group then fails and the lap delivers
+      # nothing. Nothing here counts rounds from files: a resumed group starts at one.
+      max_iterations: 3
+      fresh_context: true
+      nodes:
+        - id: pre-review
+          script: pre-review
+          runtime: bun
+          timeout: 1620000
+          with:
+            builder: "$build.output"
+            pr: "$pick.output.pr"
+            target: "$pick.output.target"
+          output_format:
+            type: object
+            properties:
+              head: { type: string }
+              clean: { type: string, enum: ["true", "false"] }
+              blocking: { type: integer }
+              review: { type: string }
+              summary: { type: string }
+            required: [head, clean, blocking, review, summary]
+        - id: fix
+          command: loop-fix
+          context: fresh
+          idle_timeout: 2700000
+          depends_on: [pre-review]
+          when: "$pre-review.output.clean == 'false'"
+          with:
+            review: "$pre-review.output.review"
+            builder: "$build.output"
+            target: "$pick.output.target"
+            runtime: "$INPUTS.runtime"
+
+  # Runs whatever the gate did and says whether it published: a failed gate (Codex down,
+  # or three rounds still blocking) leaves the commit unpushed and the lap delivers nothing.
+  - id: publish
+    script: publish
+    runtime: bun
+    depends_on: [gate]
+    trigger_rule: all_done
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true'"
+    with:
+      builder: "$build.output"
+      pr: "$pick.output.pr"
+      target: "$pick.output.target"
+    output_format:
+      type: object
+      properties:
+        pr: { type: string }
+        head: { type: string }
+        published: { type: string, enum: ["true", "false"] }
+        reason: { type: string }
+      required: [pr, head, published, reason]
 
   # Complex work: the full shipping pipeline (triage, investigate or plan,
   # implement, multi-lens review, CI) up to a ready pull request. Ordered after
@@ -136,12 +288,13 @@ nodes:
   - id: subject
     script: subject
     runtime: bun
-    depends_on: [claim, build, ship]
+    depends_on: [claim, checkout, build, publish, ship]
     trigger_rule: all_done
-    when: "$pick.output.route != 'none' && $claim.output.held == 'true'"
+    when: "$pick.output.route == 'continue' && $claim.output.held == 'true' && $checkout.output.ok == 'true' || $pick.output.route == 'simple' && $claim.output.held == 'true' || $pick.output.route == 'complex' && $claim.output.held == 'true'"
     with:
       target: "$pick.output.target"
       pr: "$pick.output.pr"
+      publish: { from: "$publish.output", if_skipped: "" }
       builder: { from: "$build.output", if_skipped: "" }
       ship: { from: "$ship.output", if_skipped: "" }
     output_format:
@@ -153,6 +306,32 @@ nodes:
         files: { type: string }
         started: { type: string }
       required: [pr, head, base, files, started]
+
+  # The external review of a loop-built head. archon-deliver's gate reviews a
+  # complex lap's pull request, so this runs on the simple and continue routes
+  # only. With the Codex policy it reads the review publish stored for this head
+  # (the pre-push one) and runs Codex only for a head no review covers, in a
+  # worktree of its own; any other policy answers `ran: false`. The reviewer gives
+  # every blocking finding a disposition, as it does for the app check's lines.
+  - id: external-review
+    script: external-review
+    runtime: bun
+    timeout: 1620000
+    depends_on: [subject]
+    when: "$pick.output.route != 'complex'"
+    with:
+      pr: "$subject.output.pr"
+      head: "$subject.output.head"
+    output_format:
+      type: object
+      properties:
+        ran: { type: string, enum: ["true", "false"] }
+        reason: { type: string }
+        review: { type: string }
+        head: { type: string }
+        blocking: { type: integer }
+        findings: { type: string }
+      required: [ran, reason, review, head, blocking, findings]
 
   # Black-box check: runs the app against the contract and the holdout before it
   # reads any diff, on the pull request merged with the current default branch. Its
@@ -222,7 +401,8 @@ nodes:
     command: loop-review
     context: fresh
     idle_timeout: 2700000
-    depends_on: [check-app, evidence]
+    depends_on: [check-app, evidence, external-review]
+    trigger_rule: none_failed_min_one_success
     with:
       route: "$pick.output.route"
       target: "$pick.output.target"
@@ -235,9 +415,11 @@ nodes:
       app_check: "$check-app.output"
       evidence_ok: "$evidence.output.ok"
       evidence_problems: "$evidence.output.problems"
+      external_review: { from: "$external-review.output", if_skipped: "" }
       runtime: "$INPUTS.runtime"
       merge: "$INPUTS.merge"
       rejections: "$INPUTS.rejections"
+      base_moves: "$INPUTS.base_moves"
     output_format:
       type: object
       properties:
@@ -308,7 +490,8 @@ nodes:
       identity: ""
 
   # Free the work item for the next lap however this run ended: after review and
-  # deploy finished, failed or were skipped.
+  # deploy finished, failed or were skipped. A branch the run's checkout was on that
+  # holds work no remote has keeps the claim live instead, naming that work.
   - id: release
     script: release
     runtime: bun
@@ -318,3 +501,21 @@ nodes:
     with:
       target: "$pick.output.target"
       pr: "$pick.output.pr"
+
+  # Delete what this lap built and no longer needs, after everything else finished,
+  # failed or was skipped. A failed cleanup is reported but never fails the run.
+  - id: cleanup
+    depends_on: [release]
+    trigger_rule: all_done
+    when: "$pick.output.route != 'none' && $INPUTS.cleanup != ''"
+    timeout: 600000
+    bash: |
+      if eval "$INPUTS_CLEANUP" >&2; then
+        echo '{"ok":true}'
+      else
+        echo '{"ok":false}'
+      fi
+    output_format:
+      type: object
+      properties: { ok: { type: boolean } }
+      required: [ok]

@@ -181,6 +181,15 @@ export function untestedMerge(facts: MergeFacts): string | null {
     : null;
 }
 
+/**
+ * The decision a merge-gate refusal posts after `Loop review:`. When the default branch moving past
+ * the reviewed head is the only reason, it is `base moved`: the next lap only merges the default
+ * branch in, and that does not count toward the loop's send-back cap (it has a cap of its own).
+ */
+export function refusalDecision(refusals: readonly string[], baseMoved: string): 'base moved' | 'not merged' {
+  return refusals.length === 1 && refusals[0] === baseMoved ? 'base moved' : 'not merged';
+}
+
 export interface JudgeChange {
   readonly file: string;
   readonly change: string;

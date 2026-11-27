@@ -29,6 +29,7 @@ review__scope:
 review__code: "0 findings"
 review__simplify__simplify: { findings: false }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__tests: "0 findings"
 review__docs: "0 findings"
@@ -44,6 +45,7 @@ review__publish:
   findings_summary: "stub: selected review is clean"
   report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
 gate-ready: '{"ready":"true"}'
+external-review-policy: { mode: none }
 validate__mode: '{"comparison":false}'
 validate__applicability: { fingerprint: fixture, scope: "", context: "", validator: fixture, generation: 1, reason: "first validation for this run", nonce: fixture, reuse: false }
 validate__discover: { checks: [{ name: "project gate", argv: ["stub-gate"] }], notes: "stub: the project's aggregate gate" }

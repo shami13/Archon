@@ -33,6 +33,7 @@ review__scope:
 review__code: "1 blocking finding"
 review__simplify__simplify: { findings: false }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__tests: "0 findings"
 review__synthesize:
@@ -82,6 +83,7 @@ flip-ready: { pr_url: "https://github.com/example/repo/pull/7" }
 outcome: { pr_url: "https://github.com/example/repo/pull/7", summary: "https://github.com/example/repo/pull/7" }
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: completed
   reached: [gate-correction-green, flip-ready]

@@ -22,8 +22,19 @@ const providers = [
     descriptor: claude,
     path: 'claude',
     parse: parseClaudeConfigStrict,
-    valid: { model: 'sonnet', settingSources: ['project'], claudeBinaryPath: '/binary' },
-    invalid: [{ settingSources: ['bad'] }, { claudeBinaryPath: '' }],
+    valid: {
+      model: 'sonnet',
+      settingSources: ['project'],
+      claudeBinaryPath: '/binary',
+      workflowPlugins: ['ponytail@ponytail'],
+      workflowSkills: ['graphify'],
+    },
+    invalid: [
+      { settingSources: ['bad'] },
+      { claudeBinaryPath: '' },
+      { workflowPlugins: ['   '] },
+      { workflowSkills: [''] },
+    ],
   },
   {
     descriptor: codex,

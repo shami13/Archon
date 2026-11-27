@@ -92,7 +92,7 @@ Every pass, append one line to the body of a single open issue titled `Loop metr
 
 `<UTC date-time> | merged since last pass: N (simple S, complex C, continue K) | open PRs: N | loop send-backs since last pass: N | merge-gate refusals: N | ship correction rounds: N | needs-owner open: N | owner questions open: N | default branch checks: green|red (CI|local gate) | laps since last pass: N (empty E, failed F) | health actions: N`
 
-Count send-backs only from `Loop review: sent back` comments, refusals from `Loop review: not merged`, and the shipping pipeline's own correction rounds separately: they are different things. When the repository has no CI running, say `local gate` and report the result of running the project's checks on the default branch yourself.
+Count send-backs only from `Loop review: sent back` and `Loop review: base moved` comments, refusals from `Loop review: not merged`, and the shipping pipeline's own correction rounds separately: they are different things. When the repository has no CI running, say `local gate` and report the result of running the project's checks on the default branch yourself.
 
 ## Never
 

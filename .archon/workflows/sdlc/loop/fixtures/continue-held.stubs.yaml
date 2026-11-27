@@ -1,0 +1,24 @@
+# Dry-run fixture: the continue route on a pull request whose branch another
+# worktree holds with a commit no remote has (a failed run's unpushed work). The
+# checkout refuses, so this run builds, reviews, publishes and checks nothing; it
+# only releases its own claim. An unstubbed node that ran would fail the fixture.
+pick:
+  route: continue
+  target: "https://github.com/example/app/issues/3"
+  pr: "https://github.com/example/app/pull/7"
+  confidence: high
+  depth: normal
+  area: app/
+  reason: "stub: review findings outstanding on a loop-owned pull request"
+claim:
+  held: "true"
+  holder: fixture-run
+  reason: "stub: this run holds the work item"
+checkout:
+  ok: "false"
+  branch: "archon/task-fix-notes"
+  reason: "stub: archon/task-fix-notes (checked out in /worktrees/task-earlier) holds work no remote has: archon/task-fix-notes has 1 commit(s) no origin ref has: 4f75080; this lap leaves the item to the run that made it"
+release: "released 1 claim(s)"
+fixture:
+  expect: completed
+  reached: [pick, claim, checkout, release]

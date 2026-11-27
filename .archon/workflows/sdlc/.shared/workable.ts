@@ -5,12 +5,13 @@
  * costs a pick, a worktree and a database run, and a backlog that is one long chain of
  * dependencies leaves most parallel laps with nothing. This mirrors the pick rules that
  * are facts rather than judgement: an item with a live claim is taken, an item labelled
- * `needs-owner` waits for the owner, an issue waits for its `Depends on:` items, and the
+ * `needs-owner` waits for the owner, an issue waits for its `Depends on:` items, an item
+ * the run's label filter (`labels_only`, `labels_skip`) leaves out is another loop's, and the
  * issues the manager keeps for itself are not work. Anything it is unsure of counts as
  * workable, so the gate can only skip laps that would have picked nothing.
  */
 
-import { CLAIM_PREFIX } from './claims.ts';
+import { CLAIM_PREFIX, KEPT_NOTE } from './claims.ts';
 
 export interface BoardComment {
   readonly body: string;
@@ -58,6 +59,36 @@ export interface Workability {
 /** The label an owner decision carries; the loop never works an item under it. */
 export const OWNER_LABEL = 'needs-owner';
 
+/**
+ * Which labels a loop works: with `only` set, items carrying at least one of them; never an
+ * item carrying one of `skip`. Both empty: every item. GitHub label names ignore case.
+ */
+export interface LabelFilter {
+  readonly only: readonly string[];
+  readonly skip: readonly string[];
+}
+
+export const NO_LABEL_FILTER: LabelFilter = { only: [], skip: [] };
+
+/** A comma-separated input (`host:mac, docs`) as label names. */
+export function labelNames(value: string): string[] {
+  return value
+    .split(',')
+    .map(name => name.trim())
+    .filter(name => name !== '');
+}
+
+/** Why the filter keeps a loop off an item with these labels, or null when it may work it. */
+export function labelHold(labels: readonly string[], filter: LabelFilter): string | null {
+  const has = new Set(labels.map(name => name.toLowerCase()));
+  const skipped = filter.skip.find(name => has.has(name.toLowerCase()));
+  if (skipped !== undefined) return skipped;
+  if (filter.only.length > 0 && !filter.only.some(name => has.has(name.toLowerCase()))) {
+    return `not labelled ${filter.only.join(' or ')}`;
+  }
+  return null;
+}
+
 /** Issues the manager keeps for its own records. They hold questions and metrics, not work. */
 export const MANAGER_TITLES = new Set(['Owner decisions needed', 'Loop metrics']);
 
@@ -96,13 +127,15 @@ export function liveClaimComments(
 /**
  * The board as a lap would find it. `endedRuns` are runs the scheduler knows have
  * finished, failed or been cancelled: a run killed before its release step never frees
- * its item, so its claim is treated as dead here and returned in `ended` for release.
+ * its item, so its claim is treated as dead here and returned in `ended` for release. A
+ * claim its run's release kept (`KEPT_NOTE`) stays live.
  */
 export function workability(
   board: Board,
   expiryHours: number,
   now = Date.now(),
-  endedRuns: ReadonlySet<string> = new Set()
+  endedRuns: ReadonlySet<string> = new Set(),
+  filter: LabelFilter = NO_LABEL_FILTER
 ): Workability {
   const openIssues = new Set(board.issues.map(item => item.number));
   const openPulls = new Set(board.pulls.map(item => item.number));
@@ -115,7 +148,8 @@ export function workability(
   ] as const) {
     for (const item of items) {
       for (const { run, comment } of liveClaimComments(item.comments, expiryHours, now)) {
-        if (endedRuns.has(run)) {
+        // A claim the run's release kept guards that run's unpushed work: it is live, not a missed release.
+        if (endedRuns.has(run) && !comment.body.includes(KEPT_NOTE)) {
           if (comment.url) ended.push({ kind, number: item.number, run, url: comment.url });
           continue;
         }
@@ -137,16 +171,24 @@ export function workability(
     const owner = pull.labels.includes(OWNER_LABEL) ||
       linked.some(n => board.issues.find(i => i.number === n)?.labels.includes(OWNER_LABEL));
     const holder = claimed.get(`pull:${pull.number}`) ?? linked.map(n => claimed.get(`issue:${n}`)).find(Boolean);
+    // A pull request carries the labels of the issues it delivers, so both loops see it as one item.
+    const filtered = labelHold(
+      [...pull.labels, ...linked.flatMap(n => board.issues.find(i => i.number === n)?.labels ?? [])],
+      filter
+    );
     if (owner) waiting.push({ kind: 'pull', number: pull.number, why: OWNER_LABEL });
+    else if (filtered !== null) waiting.push({ kind: 'pull', number: pull.number, why: filtered });
     else if (holder) waiting.push({ kind: 'pull', number: pull.number, why: `claimed by run ${holder}` });
     else workable.push({ kind: 'pull', number: pull.number });
   }
   for (const issue of board.issues) {
     const blockers = dependencies(issue.body).filter(n => openIssues.has(n) || openPulls.has(n));
     const holder = claimed.get(`issue:${issue.number}`);
+    const filtered = labelHold(issue.labels, filter);
     let why: string | null = null;
     if (MANAGER_TITLES.has(issue.title.trim())) why = "the manager's own record";
     else if (issue.labels.includes(OWNER_LABEL)) why = OWNER_LABEL;
+    else if (filtered !== null) why = filtered;
     else if (deliveredBy.has(issue.number)) why = `delivered by pull request #${deliveredBy.get(issue.number)}`;
     else if (holder) why = `claimed by run ${holder}`;
     else if (blockers.length > 0) why = `depends on ${blockers.map(n => `#${n}`).join(', ')}`;

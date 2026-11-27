@@ -1,0 +1,38 @@
+name: archon-ponytail
+description: |
+  Review a lap's committed change the way the ponytail-review skill does: correct,
+  safe, holds under load, tested, fast, lean. Read-only: it judges, it never edits.
+
+  Runs after the code is written and before the change is reviewed for its push or its
+  pull request, so a finding is fixed while nothing is published. The loop's in-loop
+  builder and delivery both call it; each fixes the findings in a step of its own.
+
+  Use when: a committed change needs its quality judged before it leaves the checkout.
+  NOT for: fixing findings (the caller's fix step), or writing code.
+
+model: medium
+
+inputs:
+  work_order:
+    default: ""
+    description: >-
+      The accepted outcome and scope boundaries, and for the loop the builder's report
+      (its BRANCH, COMMIT and PUBLISH lines).
+
+returns: ponytail-review
+
+nodes:
+  - id: ponytail-review
+    output_type: ponytail-review
+    command: ponytail-review
+    context: fresh
+    mutates_checkout: false
+    # No skills: here, so every provider can run it. A host that wants the
+    # ponytail-review skill adds it with assistants.claude.workflowSkills (and the
+    # plugin with workflowPlugins); elsewhere the command's own checklist applies.
+    output_format:
+      type: object
+      properties:
+        # True when the report holds any finding: the caller's fix step judges each one.
+        findings: { type: boolean }
+      required: [findings]

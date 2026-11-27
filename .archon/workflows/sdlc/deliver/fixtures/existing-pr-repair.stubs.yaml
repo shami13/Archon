@@ -27,6 +27,7 @@ review__scope:
 review__code: "1 blocking finding"
 review__simplify__simplify: { findings: false }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__tests: "0 findings"
 review__synthesize:
@@ -84,6 +85,7 @@ classify:
     docs: "stub: no doc-facing changes"
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":false}'
+external-review-policy: { mode: none }
 fixture:
   expect: completed
   inputs:
@@ -95,5 +97,6 @@ fixture:
   resolved-text-contains:
     impl__implement: "repair of an existing pull request on its own branch: commit here and never open another branch or pull request for it"
     fix__implement: "repair of an existing pull request on its own branch: commit here and never open another branch or pull request for it"
+    ponytail-review__ponytail-review: "pull request #42, already open on this branch"
     validate__discover: "packages/fixture-scope"
 exec-code: true

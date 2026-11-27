@@ -53,6 +53,7 @@ deliver__review__scope:
 deliver__review__code: "0 findings"
 deliver__review__simplify__simplify: { findings: false }
 deliver__review__seams: "0 findings"
+deliver__ponytail-review__ponytail-review: { findings: false }
 deliver__shape__simplify: { findings: false }
 deliver__review__tests: "0 findings"
 deliver__review__review-complete: "settled"
@@ -67,6 +68,7 @@ deliver__review__publish:
   findings_summary: "stub: no open findings"
   report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
 deliver__gate-ready: '{"ready":"true"}'
+deliver__external-review-policy: { mode: none }
 deliver__review-policy: { risks: "fixture-owned-policy" }
 deliver__classify:
   tier: full

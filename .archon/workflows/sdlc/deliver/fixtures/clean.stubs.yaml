@@ -21,6 +21,7 @@ review__scope:
 review__code: "0 findings"
 review__simplify__simplify: { findings: false }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__tests: "0 findings"
 review__review-complete: "settled"
@@ -35,6 +36,7 @@ review__publish:
   findings_summary: "stub: clean on initial review"
   report: { type: archon_artifact, run_id: "fixture-run", path: "review/report.md" }
 gate-ready: '{"ready":"true"}'
+external-review-policy: { mode: none }
 ci-probe: '{"state":"concluded","detail":"no checks configured on this repository — nothing to await"}'
 ci-verdict: '{"state":"concluded","detail":"no checks configured on this repository — nothing to await"}'
 ci-attention-route: '{"attention":false,"red_cause":""}'

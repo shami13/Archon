@@ -139,6 +139,18 @@ describe('bundled-defaults', () => {
     });
   });
 
+  describe('BUNDLED_WORKFLOWS provider portability', () => {
+    // A node that names skills or plugins fails the capability preflight on a provider
+    // without them (Codex declares skills: false); hosts add them through
+    // assistants.claude.workflowSkills / workflowPlugins instead.
+    it('no bundled workflow names skills or plugins on a node', () => {
+      const naming = Object.entries(BUNDLED_WORKFLOWS)
+        .filter(([, content]) => /^\s+(skills|plugins):/m.test(content))
+        .map(([name]) => name);
+      expect(naming).toEqual([]);
+    });
+  });
+
   describe('BUNDLED_COMMANDS', () => {
     it('every command has meaningful content (>50 chars)', () => {
       for (const content of Object.values(BUNDLED_COMMANDS)) {
@@ -434,9 +446,11 @@ describe('bundled-defaults', () => {
       // The flip used to name ten ancestors because a failure propagated exactly one
       // hop: a join that named only the tail of a chain never saw the chain's gates
       // fail. Failure-cascade skips carry `upstream_failed` across every hop now, so
-      // the list is the four the flip actually needs. gate-validated, gate-ready and
+      // the list is the five the flip actually needs. gate-validated, gate-ready and
       // validate are reachable through ci-verdict; ci-verdict stays because the rule
       // needs one successful dependency, and a clean-review delivery has no other.
+      // external-review-ready supplies the head the flip binds to when the external
+      // review gate is on, and is skipped when it is off.
       // That the cascade really blocks is proved by execution, not by this list —
       // deliver's validate-red* and late-red-unconverged fixtures expect the gate
       // itself as the failed node and never reach the flip.
@@ -452,6 +466,7 @@ describe('bundled-defaults', () => {
         'ci-attention-route',
         'ci-attention',
         'publish-pr-body',
+        'external-review-ready',
       ]);
       expect(flipReady?.trigger_rule).toBe('none_failed_min_one_success');
     });

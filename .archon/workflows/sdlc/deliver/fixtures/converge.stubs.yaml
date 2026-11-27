@@ -25,6 +25,7 @@ review__scope:
 review__code: "2 blocking findings"
 review__simplify__simplify: { findings: false }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__tests: "0 findings"
 review__errors: "0 findings"
@@ -87,6 +88,7 @@ classify:
     docs: "stub: no doc-facing changes"
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: completed
   reached: [review__errors, review__simplify__simplify, ci-note, recheck__synthesize]

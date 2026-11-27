@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseAgentJson } from '../../.shared/agent-json.ts';
+import { externalReviewHold } from '../../.shared/external-review.ts';
 
 type JsonObject = Record<string, unknown>;
 type MergeMethod = keyof typeof methodFlags;
@@ -196,6 +197,16 @@ function pathPolicyReasons(planValue: JsonObject): string[] {
     : [];
 }
 
+// With the external review gate on, a planned head merges only with the passing
+// Copilot review archon-deliver records for it; no assessed evidence stands in.
+function externalReviewReasons(planValue: JsonObject): string[] {
+  const entries = Array.isArray(planValue.pull_requests) ? planValue.pull_requests : [];
+  return entries.map(object).flatMap(entry => {
+    const hold = externalReviewHold(String(entry.url), String(entry.head_sha));
+    return hold === undefined ? [] : [hold];
+  });
+}
+
 function gate(): void {
   const assessment = object(input('assessment'));
   const read = plan();
@@ -225,6 +236,7 @@ function gate(): void {
     reasons.push(`required CI policy is unknown${policyReason ? `: ${policyReason}` : ''}`);
   }
   reasons.push(...pathPolicyReasons(current.value));
+  reasons.push(...externalReviewReasons(current.value));
   if (assessment.validation_verified !== true) reasons.push('independent validation is not verified');
   if (assessment.review_verified !== true) reasons.push('independent review is not verified');
   reasons.push(...sealing.reasons);
@@ -331,6 +343,11 @@ function execute(): void {
   }
   if (typeof repository !== 'string' || !Number.isInteger(number) || typeof head !== 'string') {
     stop(urls, queued, priorBaseSha, 'planned pull request identity is malformed');
+    return;
+  }
+  const hold = externalReviewHold(typeof entry.url === 'string' ? entry.url : '', head);
+  if (hold !== undefined) {
+    stop(urls, queued, priorBaseSha, hold);
     return;
   }
 

@@ -41,6 +41,7 @@ fixture:
   expect: completed
 exec-code: true
 deliver__gate-ready: '{"gate":"ready"}'
+deliver__external-review-policy: { mode: none }
 deliver__impl__assert-changed: "2 files changed"
 deliver__gate-green: '{"gate":"green","red_cause":"","stage":"The implementation","summary":""}'
 deliver__ci-verdict: '{"state":"concluded","detail":"all checks green"}'
@@ -57,6 +58,7 @@ deliver__review__scope:
 deliver__review__code: "0 findings"
 deliver__review__simplify__simplify: { findings: false }
 deliver__review__seams: "0 findings"
+deliver__ponytail-review__ponytail-review: { findings: false }
 deliver__shape__simplify: { findings: false }
 deliver__review__tests: "0 findings"
 deliver__review__review-complete: "settled"

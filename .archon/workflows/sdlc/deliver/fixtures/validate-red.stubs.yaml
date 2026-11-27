@@ -29,6 +29,7 @@ review__scope:
 review__code: "0 findings"
 review__simplify__simplify: { findings: false }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__tests: "0 findings"
 review__synthesize:
@@ -62,6 +63,7 @@ classify:
     docs: "stub: no doc-facing changes"
 file-discoveries: '{"issues":[]}'
 fork: '{"fork":true}'
+external-review-policy: { mode: none }
 fixture:
   expect: failed
   fail-node: gate-validated

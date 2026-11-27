@@ -56,6 +56,12 @@ export interface ClaudeProviderDefaults {
    *  Archon builds when `CLAUDE_BIN_PATH` is not set; optional in dev mode
    *  (SDK resolves from node_modules). */
   claudeBinaryPath?: string;
+  /** Plugin ids (`name@marketplace`) every workflow node loads on top of the
+   *  ones it names. A host-level choice: a named plugin that is not installed
+   *  fails the node, so set it only where the plugin is installed. */
+  workflowPlugins?: string[];
+  /** Skill names every workflow node loads on top of the ones it names. */
+  workflowSkills?: string[];
 }
 
 export interface CodexProviderDefaults {

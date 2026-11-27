@@ -10,6 +10,7 @@ pick:
 build: 'Built it.
 
   PR: https://github.com/example/app/pull/9'
+ponytail-review__ponytail-review: { findings: false }
 subject:
   pr: "https://github.com/example/app/pull/9"
   head: "abc1234"
@@ -75,6 +76,7 @@ fixture:
   - pick
   - claim
   - build
+  - ponytail-review__ponytail-review
   - pre-review
   - publish
   - subject

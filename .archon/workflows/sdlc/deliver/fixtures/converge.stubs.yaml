@@ -25,6 +25,7 @@ review__scope:
 review__code: "2 blocking findings"
 review__simplify__simplify: { findings: false }
 review__seams: "0 findings"
+ponytail-review__ponytail-review: { findings: false }
 shape__simplify: { findings: false }
 review__tests: "0 findings"
 review__errors: "0 findings"

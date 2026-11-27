@@ -131,12 +131,52 @@ nodes:
   # delete. The full-tier review runs the same charter again as a lens, so the code
   # gets a second, independent structure look after the PR opens; on the focused
   # tier the focused reviewer's machinery check is that second look.
+  # The ponytail review judges the implementation (correct, safe, under load, tested,
+  # fast, lean) before the structure check and before anything is published; a
+  # correction adopts its findings and the green gate proves the result again.
+  # Ponytail itself comes from the host's config, never from here.
+  - id: ponytail-review
+    include: archon-ponytail
+    with:
+      work_order: "$INPUTS.work"
+    depends_on: [gate-green]
+
+  - id: ponytail-fix
+    include: archon-implement
+    depends_on: [ponytail-review]
+    when: "$ponytail-review.output.findings == true"
+    with:
+      work: >-
+        Before this work goes on, judge the findings recorded in
+        $ARTIFACTS_DIR/ponytail-review.md. Read it and the accepted work order below in
+        full. Adopt every finding the project's values back. Decline one only with the
+        evidence that it is wrong or that its smaller shape changes behavior; the
+        first review round's synthesis judges every decline. Write
+        $ARTIFACTS_DIR/ponytail-dispositions.md with one entry per finding: adopted, or
+        declined with its evidence. Keep the requested outcome and its tests intact.
+
+        Accepted work order:
+        $INPUTS.work
+
+  - id: gate-ponytail
+    script: gate-green
+    runtime: bun
+    output_type: green-gate
+    output_format: *green_gate
+    depends_on: [ponytail-fix]
+    with:
+      green: "$ponytail-fix.output.green"
+      red_cause: "$ponytail-fix.output.red_cause"
+      summary: "$ponytail-fix.output.summary"
+      stage: "The ponytail correction"
+
   - id: shape
     include: archon-simplify
     with:
       stage: pre-pr
       work_order: "$INPUTS.work"
-    depends_on: [gate-green]
+    depends_on: [ponytail-review, gate-ponytail]
+    trigger_rule: none_failed_min_one_success
 
   - id: reshape
     include: archon-implement

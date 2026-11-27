@@ -1,0 +1,71 @@
+# Dry-run fixture: the simple route where the ponytail review finds something.
+# ponytail-fix commits the correction, and the Codex gate then reviews that HEAD.
+pick:
+  route: simple
+  target: "https://github.com/example/app/issues/5"
+  pr: ""
+  confidence: high
+  depth: normal
+  area: app/
+  reason: "stub: next unblocked issue, one module, clear criteria"
+build: "Built the notes endpoint.\nPR: https://github.com/example/app/pull/9"
+ponytail-review__ponytail-review: { findings: true }
+ponytail-fix: "Adopted the lean finding.\nBRANCH: notes\nCOMMIT: abc1234\nPR: none"
+subject:
+  pr: "https://github.com/example/app/pull/9"
+  head: "abc1234"
+  base: main
+  files: "app/notes.py"
+  started: "1700000000000"
+pre-review: { head: "abc1234", clean: "true", blocking: 0, review: "/fixture/pre-review/abc1234.json", summary: "stub: Codex pre-push review of abc1234: approve, 0 advisory note(s).", round: "1" }
+publish: { pr: "https://github.com/example/app/pull/9", head: "abc1234", published: "true", reason: "stub: pushed after a clean review" }
+check-app:
+  pr: "https://github.com/example/app/pull/9"
+  head: "abc1234"
+  merged_with: "abc1234"
+  lines:
+  - id: C1
+    kind: criterion
+    verdict: PASS
+    text: "saves a note: POST /notes returned 201"
+    evidence: ["/artifacts/c1.txt"]
+    pre_existing: ""
+    defect: ""
+    carried_from: ""
+  noticed: []
+  overall: "PASS"
+  summary: "stub: saves a note, no defects seen"
+evidence:
+  ok: "true"
+  problems: ""
+  overall: PASS
+  checked_at: "1700000100000"
+review:
+  outcome: merge
+  pr: "https://github.com/example/app/pull/9"
+  sha: abc1234
+  delivers: all
+  dispositions: []
+  judge_changes: []
+  reason: "stub: every criterion passed, CI green"
+land:
+  outcome: merged
+  reason: "stub: merged abc1234"
+claim:
+  held: "true"
+  holder: fixture-run
+  reason: "stub: this run holds the work item"
+release: "released 1 claim(s)"
+cleanup: { ok: true }
+external-review: { ran: "true", reason: "stub: Codex found nothing that blocks this head", review: "codex-fixturehead", head: "fixturehead", blocking: 0, findings: "/fixture/external-review/findings.json" }
+fixture:
+  expect: completed
+  reached: [pick, claim, build, ponytail-review__ponytail-review, ponytail-fix, pre-review, publish, subject, external-review, check-app, evidence, review, land, release, cleanup]
+  resolved-text-contains:
+    build: "Route: simple"
+    check-app: "/private/holdout.md"
+    review: "saves a note: POST /notes returned 201"
+  inputs:
+    runtime: "/private/run-the-app.md"
+    holdout: "/private/holdout.md"
+    cleanup: "rm -rf target/test-data"

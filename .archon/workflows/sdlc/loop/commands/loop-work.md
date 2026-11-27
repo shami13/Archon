@@ -22,6 +22,10 @@ Ask before you build. When the only way to meet the work item changes what an in
 
 If the move turns out to be wrong (the pull request was already merged, the issue is already done, or a decision only the owner can make blocks it), do not force it: comment what you found, label the item `needs-owner` if it needs a decision, and report `PUBLISH: no` (and `PR: none` when you continued nothing).
 
+## Use the code graph first
+
+When `graphify-out/graph.json` exists in the checkout, start here, before you edit: run `graphify query "<the task in a few words>"`, and `graphify affected "<symbol>"` for each symbol you will change (or use the graphify skill), then read the files they name. List the graph results you used in your report. When the file is missing, say "No code graph in this checkout" in your report and go on.
+
 ## Do it
 
 - Work on the pull request's own branch, or a new branch from the default branch for a new issue. For `continue` the loop has already checked the pull request's branch out here at origin's commit; stay on it, also when you change nothing, and report it as `BRANCH`. Never force a checkout of a branch another worktree has (`--ignore-other-worktrees`, or `checkout -B` over it): that worktree's commits would be lost. If git refuses one, leave the move as below.
